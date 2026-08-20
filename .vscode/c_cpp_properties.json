@@ -1,0 +1,21 @@
+{
+    "version": 4,
+    "configurations": [
+        {
+            "name": "STM32F407",
+            "includePath": [
+                "${workspaceFolder}/firmware/src",
+                "${workspaceFolder}/firmware/vendor/stm32f4xx_hal_driver/Inc",
+                "${workspaceFolder}/firmware/vendor/cmsis_device_f4/Include",
+                "${workspaceFolder}/firmware/vendor/cmsis_core/Core/Include"
+            ],
+            "defines": [
+                "STM32F407xx",
+                "USE_HAL_DRIVER"
+            ],
+            "compilerPath": "arm-none-eabi-gcc",
+            "cStandard": "c11",
+            "intelliSenseMode": "gcc-arm"
+        }
+    ]
+}

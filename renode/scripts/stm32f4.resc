@@ -4,8 +4,11 @@ mach create "stm32f4"
 
 machine LoadPlatformDescription @boards/stm32f4.repl
 
+sysbus LoadELF @/workspace/build/firmware.elf
+
 machine StartGdbServer 3333
 
-showAnalyzer uart3
+emulation CreateServerSocketTerminal 9002 "uart3term" false
+connector Connect sysbus.uart3 uart3term
 
 start

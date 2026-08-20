@@ -11,6 +11,11 @@ flash: Memory.MappedMemory @ sysbus 0x08000000
 sram: Memory.MappedMemory @ sysbus 0x20000000
     size: 0x20000
 
+// Flash interface (ACR register etc.) - used by HAL_Init() for
+// prefetch/cache enable, separate from the flash memory region above
+flash_controller: MTD.STM32F4_FlashController @ sysbus 0x40023C00
+    flash: flash
+
 // NVIC: Nested Vectored Interrupt Controller (also drives SysTick)
 nvic: IRQControllers.NVIC @ sysbus 0xE000E000
     priorityMask: 0xF0

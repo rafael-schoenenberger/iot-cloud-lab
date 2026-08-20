@@ -1,24 +1,31 @@
-version: "3.9"
-
 services:
+  firmware-build:
+    build:
+      context: ../firmware
+      dockerfile: Dockerfile.sources
+    image: firmware:latest
+    volumes:
+      - ../firmware/src:/workspace/src
+      - ../firmware/vendor:/workspace/vendor
+      - ../firmware/build:/workspace/build
+    command: >
+      sh -c "cmake -S /workspace/src -B /workspace/build -G Ninja &&
+      ninja -C /workspace/build"
+
   renode:
+    build:
+      context: ../renode
+      dockerfile: Dockerfile.renode
     image: renode:latest
     volumes:
       - ../renode/boards:/workspace/boards
       - ../renode/scripts:/workspace/scripts
+      - ../firmware/build:/workspace/build
     ports:
       - "3333:3333"
-    command: ["renode", "/workspace/scripts/stm32f4.resc"]
-
-  firmware:
-    image: firmware:latest
-    volumes:
-      - ../firmware/build:/workspace/build
+      - "9002:9002"
+    stdin_open: true
     depends_on:
-      - renode
-    command: >
-      arm-none-eabi-gdb /workspace/build/firmware.elf
-      -ex "target remote renode:3333"
-      -ex "monitor reset halt"
-      -ex "load"
-      -ex "continue"
+      firmware-build:
+        condition: service_completed_successfully
+    command: ["renode", "--console", "/workspace/scripts/stm32f4.resc"]

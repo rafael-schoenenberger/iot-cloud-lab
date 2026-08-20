@@ -1,0 +1,3 @@
+# firmware build artifacts (cmake/ninja output, generated on every build)
+firmware/build/*
+

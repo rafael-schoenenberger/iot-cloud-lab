@@ -1,19 +1,4 @@
-# Check Renode image
-if (-not (docker image inspect renode:latest | Out-Null)) {
-    Write-Host "[INFO] Renode image not found — building..."
-    docker build -t renode:latest -f ../renode/Dockerfile.renode ../renode
-} else {
-    Write-Host "[INFO] Renode image already exists — skipping build."
-}
+# builds firmware, then builds/starts renode which loads it - rerun anytime after changes
+# once it's up, connect to the UART3 debug output yourself: putty -raw 127.0.0.1 9002
 
-# Check Firmware image
-if (-not (docker image inspect firmware:latest | Out-Null)) {
-    Write-Host "[INFO] Firmware image not found — building..."
-    docker build -t firmware:latest -f ../firmware/Dockerfile.sources ../firmware
-} else {
-    Write-Host "[INFO] Firmware image already exists — skipping build."
-}
-
-# Start compose from compose/ folder
-Write-Host "[INFO] Starting docker compose..."
-docker compose -f ./compose/docker-compose.yml up
+docker compose -f ./compose/docker-compose.yml up --build
