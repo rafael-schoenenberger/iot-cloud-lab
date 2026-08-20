@@ -1,51 +1,69 @@
-# CPU: ARM Cortex‑M4 Core
+// CPU: ARM Cortex-M4 Core
 cpu: CPU.CortexM @ sysbus
     cpuType: "cortex-m4"
+    nvic: nvic
 
-# Flash: On‑Chip Program Memory
+// Flash: On-Chip Program Memory (1 MB)
 flash: Memory.MappedMemory @ sysbus 0x08000000
-    size: 0x100000	# 1 MB
+    size: 0x100000
 
-# SRAM: On‑Chip Data Memory
+// SRAM: On-Chip Data Memory (128 KB)
 sram: Memory.MappedMemory @ sysbus 0x20000000
-    size: 0x20000	# 128 KB
+    size: 0x20000
 
-# NVIC: Nested Vectored Interrupt Controller
-nvic: Miscellaneous.NVIC @ sysbus 0xE000E100
+// NVIC: Nested Vectored Interrupt Controller (also drives SysTick)
+nvic: IRQControllers.NVIC @ sysbus 0xE000E000
+    priorityMask: 0xF0
+    systickFrequency: 168000000
+    IRQ -> cpu@0
 
-# SCB: System Control Block
-scb: Miscellaneous.SCB @ sysbus 0xE000ED00
+// RTC: required by RCC below
+rtc: Timers.STM32F4_RTC @ sysbus 0x40002800
+    AlarmIRQ -> nvic@41
 
-# SysTick: System Timer
-systick: Miscellaneous.SysTick @ sysbus 0xE000E010
+// RCC: Reset and Clock Control
+rcc: Miscellaneous.STM32F4_RCC @ sysbus 0x40023800
+    rtcPeripheral: rtc
 
-# EXTI: External Interrupt Controller
-exti: Miscellaneous.STM32_EXTI @ sysbus 0x40013C00
-
-# RCC: Reset and Clock Control
-rcc: Miscellaneous.STM32_RCC @ sysbus 0x40023800
-
-# PWR: Power Control
+// PWR: Power Control
 pwr: Miscellaneous.STM32_PWR @ sysbus 0x40007000
 
-# UART1: GPS
-uart1: UART.STM32_UART @ sysbus 0x40011000
-    irq: 37
-    baudRate: 115200
+// UART1: Modem (SARA-R412M) - no Renode model, raw UART only, todo
+uart1: UART.STM32_UART @ sysbus <0x40011000, +0x100>
+    -> nvic@37
 
-# UART2: Debug output (directed to VS Code)
-uart2: UART.STM32_UART @ sysbus 0x40004400
-    irq: 38
-    baudRate: 115200
+// UART2: GNSS (NEO-M8U) - no Renode model, NMEA fed in manually, todo
+uart2: UART.STM32_UART @ sysbus <0x40004400, +0x100>
+    -> nvic@38
 
-# I2C1: Temperature sensor
-i2c1: I2C.STM32_I2C @ sysbus 0x40005400
-    irq: 31
+// UART3: Debug output (printf/logging, shown via showAnalyzer in the .resc)
+uart3: UART.STM32_UART @ sysbus <0x40004800, +0x100>
+    -> nvic@39
 
-# SPI1: Pressure sensor
-spi1: SPI.STM32_SPI @ sysbus 0x40013000
-    irq: 35
+// I2C1: IMU + environmental sensors
+i2c1: I2C.STM32F4_I2C @ sysbus 0x40005400
+    EventInterrupt -> nvic@31
+    ErrorInterrupt -> nvic@32
 
-# GPIO ports
-gpioa: GPIOPort.STM32_GPIO @ sysbus 0x40020000
-gpiob: GPIOPort.STM32_GPIO @ sysbus 0x40020400
+// ICM-20948: accelerometer/gyro (IMU)
+icm20948: Sensors.ICM20948 @ i2c1 0x68
+
+// BME280: pressure/humidity
+bme280: I2C.BME280 @ i2c1 0x76
+
+// TMP108: outside temperature
+tmp108: Sensors.TMP108 @ i2c1 0x48
+
+// GPIO ports
+gpioa: GPIOPort.STM32_GPIOPort @ sysbus <0x40020000, +0x400>
+    numberOfAFs: 16
+
+gpiob: GPIOPort.STM32_GPIOPort @ sysbus <0x40020400, +0x400>
+    numberOfAFs: 16
+
+// PC13: Status LED (see TaskSupervisor in the firmware)
+// PC1: MAX6369 external watchdog WDI - toggle periodically to feed it
+//      (behavioral simulation of the MAX6369 itself is not modeled yet, todo).
+//      Its RESET output goes directly to the MCU's NRST pin, not a GPIO.
+gpioc: GPIOPort.STM32_GPIOPort @ sysbus <0x40020800, +0x400>
+    numberOfAFs: 16
