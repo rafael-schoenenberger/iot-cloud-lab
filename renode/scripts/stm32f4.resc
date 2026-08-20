@@ -1,0 +1,14 @@
+using sysbus
+
+mach create "stm32f4"
+
+cpu CreateARMv7
+cpu SetModel "cortex-m4"
+
+machine LoadPlatformDescription @boards/stm32f4.repl
+
+machine StartGdbServer 3333
+
+showAnalyzer uart2
+
+start

@@ -1,0 +1,37 @@
+# Build: download and extract renode
+FROM ubuntu:22.04 AS builder
+
+ARG RENODE_VERSION=1.16.1
+
+# Install tools required for downloading and unpacking renode
+RUN apt-get update && apt-get install -y wget unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and extract renode portable package
+RUN wget https://builds.renode.io/renode-${RENODE_VERSION}.linux-portable.zip \
+    && unzip renode-${RENODE_VERSION}.linux-portable.zip -d /opt/renode \
+    && rm renode-${RENODE_VERSION}.linux-portable.zip
+
+# Runtime: full-feature renode environment
+FROM ubuntu:22.04
+
+# Install full mono and python dependencies
+RUN apt-get update && apt-get install -y \
+    mono-complete python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy renode from builder stage
+COPY --from=builder /opt/renode /opt/renode
+
+# Add renode to PATH
+ENV PATH="/opt/renode:${PATH}"
+
+# Create non-root user
+RUN useradd -m renode
+USER renode
+
+# Set working directory
+WORKDIR /workspace
+
+# Start renode by default
+CMD ["renode"]
