@@ -7,7 +7,9 @@
                 "${workspaceFolder}/firmware/src",
                 "${workspaceFolder}/firmware/vendor/stm32f4xx_hal_driver/Inc",
                 "${workspaceFolder}/firmware/vendor/cmsis_device_f4/Include",
-                "${workspaceFolder}/firmware/vendor/cmsis_core/Core/Include"
+                "${workspaceFolder}/firmware/vendor/cmsis_core/Core/Include",
+                "${workspaceFolder}/firmware/vendor/freertos_kernel/include",
+                "${workspaceFolder}/firmware/vendor/freertos_kernel/portable/GCC/ARM_CM3"
             ],
             "defines": [
                 "STM32F407xx",

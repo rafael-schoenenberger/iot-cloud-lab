@@ -1,4 +1,6 @@
 #include "stm32f4xx_hal.h"
+#include "FreeRTOS.h"
+#include "task.h"
 #include <stdio.h>
 
 /* 1 = build for the Renode simulation, 0 = build for real STM32F407 hardware.
@@ -12,9 +14,14 @@
 
 static UART_HandleTypeDef huart3;
 
+extern void xPortSysTickHandler(void);
+
 void SysTick_Handler(void)
 {
     HAL_IncTick();
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        xPortSysTickHandler();
+    }
 }
 
 static void Error_Handler(void)
@@ -22,6 +29,13 @@ static void Error_Handler(void)
     __disable_irq();
     while (1) {
     }
+}
+
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    (void)xTask;
+    (void)pcTaskName;
+    Error_Handler();
 }
 
 /* HSE = 25 MHz -> PLL -> SYSCLK = 168 MHz, APB1 = 42 MHz, APB2 = 84 MHz */
@@ -115,18 +129,30 @@ static void uart3_init(void)
     HAL_UART_Init(&huart3);
 }
 
+static void HWTask(void *argument)
+{
+    (void)argument;
+    char msg[32];
+    int count = 0;
+
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        int len = snprintf(msg, sizeof(msg), "Hello World #%d\r\n", ++count);
+        HAL_UART_Transmit(&huart3, (uint8_t *)msg, (uint16_t)len, HAL_MAX_DELAY);
+    }
+}
+
 int main(void)
 {
     HAL_Init();
     SystemClock_Config();
     uart3_init();
 
-    char msg[32];
-    int count = 0;
+    configASSERT(xTaskCreate(HWTask, "HWTask", 256, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
+
+    vTaskStartScheduler();
 
     while (1) {
-        HAL_Delay(2000);
-        int len = snprintf(msg, sizeof(msg), "Hello World #%d\r\n", ++count);
-        HAL_UART_Transmit(&huart3, (uint8_t *)msg, (uint16_t)len, HAL_MAX_DELAY);
+        /* unreachable: vTaskStartScheduler() only returns on failure */
     }
 }
