@@ -79,6 +79,7 @@ add_executable(firmware.elf
     ${HAL_DIR}/Src/stm32f4xx_hal_pwr_ex.c
     ${HAL_DIR}/Src/stm32f4xx_hal_cortex.c
     ${HAL_DIR}/Src/stm32f4xx_hal_uart.c
+    ${HAL_DIR}/Src/stm32f4xx_hal_i2c.c
     ${FREERTOS_DIR}/tasks.c
     ${FREERTOS_DIR}/list.c
     ${FREERTOS_DIR}/queue.c

@@ -13,6 +13,9 @@
 #endif
 
 static UART_HandleTypeDef huart3;
+static I2C_HandleTypeDef hi2c1;
+
+#define TMP108_ADDR 0x48
 
 extern void xPortSysTickHandler(void);
 
@@ -129,6 +132,38 @@ static void uart3_init(void)
     HAL_UART_Init(&huart3);
 }
 
+void HAL_I2C_MspInit(I2C_HandleTypeDef *hi2c)
+{
+    if (hi2c->Instance != I2C1) {
+        return;
+    }
+
+    __HAL_RCC_I2C1_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    /* PB6 = I2C1_SCL, PB7 = I2C1_SDA (AF4), open-drain as required on an I2C bus */
+    GPIO_InitTypeDef gpio = {0};
+    gpio.Pin = GPIO_PIN_6 | GPIO_PIN_7;
+    gpio.Mode = GPIO_MODE_AF_OD;
+    gpio.Pull = GPIO_PULLUP;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Alternate = GPIO_AF4_I2C1;
+    HAL_GPIO_Init(GPIOB, &gpio);
+}
+
+static void i2c1_init(void)
+{
+    hi2c1.Instance = I2C1;
+    hi2c1.Init.ClockSpeed = 100000;
+    hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
+    hi2c1.Init.OwnAddress1 = 0;
+    hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+    HAL_I2C_Init(&hi2c1);
+}
+
 static void HWTask(void *argument)
 {
     (void)argument;
@@ -142,13 +177,37 @@ static void HWTask(void *argument)
     }
 }
 
+static void TempTask(void *argument)
+{
+    (void)argument;
+    char msg[32];
+    int count = 0;
+
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(2000));
+
+        int8_t raw;
+        if (HAL_I2C_Mem_Read(&hi2c1, TMP108_ADDR << 1, 0x00,
+                              I2C_MEMADD_SIZE_8BIT, (uint8_t *)&raw, 1,
+                              HAL_MAX_DELAY) != HAL_OK) {
+            continue;
+        }
+
+        int len = snprintf(msg, sizeof(msg), "{\"temp_c\":%d,\"count\":%d}\r\n",
+                            raw, ++count);
+        HAL_UART_Transmit(&huart3, (uint8_t *)msg, (uint16_t)len, HAL_MAX_DELAY);
+    }
+}
+
 int main(void)
 {
     HAL_Init();
     SystemClock_Config();
     uart3_init();
+    i2c1_init();
 
-    configASSERT(xTaskCreate(HWTask, "HWTask", 256, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
+    // configASSERT(xTaskCreate(HWTask, "HWTask", 256, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
+    configASSERT(xTaskCreate(TempTask, "TempTask", 256, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
 
     vTaskStartScheduler();
 

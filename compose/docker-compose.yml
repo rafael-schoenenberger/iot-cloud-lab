@@ -24,8 +24,18 @@ services:
     ports:
       - "3333:3333"
       - "9002:9002"
-    stdin_open: true
+      - "9005:9005"
     depends_on:
       firmware-build:
         condition: service_completed_successfully
-    command: ["renode", "--console", "/workspace/scripts/stm32f4.resc"]
+    command: ["renode", "--disable-xwt", "-P", "9005", "/workspace/scripts/stm32f4.resc"]
+
+  sensor-sim:
+    build:
+      context: ../sensor-sim
+      dockerfile: Dockerfile.sensor-sim
+    image: sensor-sim:latest
+    volumes:
+      - ../sensor-sim:/workspace
+    depends_on:
+      - renode

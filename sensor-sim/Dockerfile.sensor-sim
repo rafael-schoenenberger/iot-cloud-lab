@@ -1,0 +1,8 @@
+FROM python:3.12-slim
+
+RUN useradd -m sensor-sim
+
+USER sensor-sim
+WORKDIR /workspace
+
+CMD ["python3", "sim_tmp108.py"]

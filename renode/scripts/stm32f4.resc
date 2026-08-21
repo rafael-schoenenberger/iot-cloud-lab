@@ -4,6 +4,8 @@ mach create "stm32f4"
 
 machine LoadPlatformDescription @boards/stm32f4.repl
 
+i2c1.tmp108 Temperature 21
+
 sysbus LoadELF @/workspace/build/firmware.elf
 
 machine StartGdbServer 3333
