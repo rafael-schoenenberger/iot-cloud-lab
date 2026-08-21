@@ -85,6 +85,7 @@ add_executable(firmware.elf
     ${FREERTOS_DIR}/queue.c
     ${FREERTOS_DIR}/timers.c
     ${FREERTOS_DIR}/event_groups.c
+    ${FREERTOS_DIR}/stream_buffer.c
     ${FREERTOS_DIR}/portable/GCC/ARM_CM3/port.c
     ${FREERTOS_DIR}/portable/MemMang/heap_4.c
     main.c

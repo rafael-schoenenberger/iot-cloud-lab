@@ -56,7 +56,7 @@ def main():
         time.sleep(UPDATE_INTERVAL_S)
 
         phase += 2 * math.pi * UPDATE_INTERVAL_S / period_s
-        if phase >= 2 * math.pi:
+        while phase >= 2 * math.pi:
             phase -= 2 * math.pi
             period_s = random.uniform(PERIOD_MIN_S, PERIOD_MAX_S)
 

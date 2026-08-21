@@ -4,13 +4,21 @@ mach create "stm32f4"
 
 machine LoadPlatformDescription @boards/stm32f4.repl
 
+# TMP108: outside temperature sensor - startup value, driven further by
+# temp-sim (see temp-sim/sim_tmp108.py) once the machine is running
 i2c1.tmp108 Temperature 21
 
 sysbus LoadELF @/workspace/build/firmware.elf
 
 machine StartGdbServer 3333
 
+# UART3: debug/printf output (see TempTask in firmware) - plain text over TCP
 emulation CreateServerSocketTerminal 9002 "uart3term" false
 connector Connect sysbus.uart3 uart3term
+
+# UART1: SARA-R412M modem link - AT commands in, OK/URCs out, consumed by the
+# modem-sim container (see modem-sim/sim_sara_r412m.py)
+emulation CreateServerSocketTerminal 9006 "uart1term" false
+connector Connect sysbus.uart1 uart1term
 
 start
