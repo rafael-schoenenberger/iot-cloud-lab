@@ -22,7 +22,9 @@ resource "aws_dynamodb_table" "telemetry" {
 }
 
 resource "aws_iam_role" "iot_rule" {
-  name = "${var.thing_name}-iot-rule-role"
+  # Cert-ID suffix so a destroy+recreate gets a fresh ARN - AWS IoT Core
+  # cached stale STS tokens for a reused role name for up to ~10 minutes.
+  name = "${var.thing_name}-iot-rule-role-${substr(aws_iot_certificate.cert.id, 0, 8)}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -53,6 +55,27 @@ resource "aws_iam_role_policy" "iot_rule_dynamodb" {
   })
 }
 
+# Diagnostic: the dynamodbv2 action fails silently otherwise - this is the
+# only way to see *why* a PutItem was rejected.
+resource "aws_cloudwatch_log_group" "iot_rule_errors" {
+  name              = "/aws/iot/${var.thing_name}-telemetry-errors"
+  retention_in_days = 3
+}
+
+resource "aws_iam_role_policy" "iot_rule_logs" {
+  name = "${var.thing_name}-iot-rule-logs"
+  role = aws_iam_role.iot_rule.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+      Resource = "${aws_cloudwatch_log_group.iot_rule_errors.arn}:*"
+    }]
+  })
+}
+
 # Future todo: if the payload ever gains its own "client_id"/"ts" field,
 # it could collide with the ones added below by the SELECT clause.
 resource "aws_iot_topic_rule" "telemetry_to_dynamodb" {
@@ -66,6 +89,13 @@ resource "aws_iot_topic_rule" "telemetry_to_dynamodb" {
 
     put_item {
       table_name = aws_dynamodb_table.telemetry.name
+    }
+  }
+
+  error_action {
+    cloudwatch_logs {
+      log_group_name = aws_cloudwatch_log_group.iot_rule_errors.name
+      role_arn       = aws_iam_role.iot_rule.arn
     }
   }
 }

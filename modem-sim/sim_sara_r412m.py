@@ -31,9 +31,11 @@ commas - which is exactly the documented purpose of that parameter.
 
 import hashlib
 import os
+import pathlib
 import socket
 import ssl
 import tempfile
+import threading
 import time
 
 import paho.mqtt.client as mqtt
@@ -42,6 +44,10 @@ RENODE_HOST = "renode"
 RENODE_PORT = 9006
 
 CERT_TYPE_NAMES = {0: "CA", 1: "CC", 2: "PK"}
+
+# Checked by the Dockerfile's HEALTHCHECK - present only while a real MQTT
+# session with AWS IoT is up (see Modem._set_healthy).
+HEALTH_FILE = pathlib.Path("/tmp/mqtt_healthy")
 
 
 def parse_params(body):
@@ -107,9 +113,24 @@ class Modem:
         self.mqtt_server = None
         self.mqtt_port = 8883
         self.mqtt_client = None
+        # Guards send(): both the main thread and paho's network thread write
+        # to the same socket, and concurrent sendall()s could interleave.
+        self.send_lock = threading.Lock()
+        self._set_healthy(False)
+
+    @staticmethod
+    def _set_healthy(healthy):
+        try:
+            if healthy:
+                HEALTH_FILE.touch()
+            else:
+                HEALTH_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass  # advisory only - never let this take the modem down
 
     def send(self, text):
-        self.sock.sendall(text.encode())
+        with self.send_lock:
+            self.sock.sendall(text.encode())
 
     def reply_ok(self, info=None):
         if info:
@@ -125,7 +146,14 @@ class Modem:
             if not line:
                 continue
             print(f"< {line}", flush=True)
-            self.handle(line)
+            try:
+                self.handle(line)
+            except (ValueError, IndexError, KeyError) as exc:
+                # Malformed/unexpected AT parameters - stay up and answer
+                # ERROR like a real modem would, instead of taking the whole
+                # process down (there's no restart: policy on this container).
+                print(f"Malformed AT command '{line}': {exc}", flush=True)
+                self.reply_error()
 
     def handle(self, line):
         if not line.upper().startswith("AT"):
@@ -224,6 +252,8 @@ class Modem:
                 callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
                 client_id=self.mqtt_client_id,
             )
+            client.on_connect = self._on_mqtt_connect
+            client.on_disconnect = self._on_mqtt_disconnect
             client.tls_set(
                 ca_certs=ca_path,
                 certfile=cert_path,
@@ -231,17 +261,41 @@ class Modem:
                 tls_version=ssl.PROTOCOL_TLS_CLIENT,
             )
             client.connect(self.mqtt_server, self.mqtt_port)
-            client.loop_start()
             self.mqtt_client = client
-            print(f"MQTT connected to {self.mqtt_server}:{self.mqtt_port} as '{self.mqtt_client_id}'", flush=True)
-            self.send("\r\n+UUMQTTC: 1,0\r\n")
+            client.loop_start()
+            print(f"MQTT connecting to {self.mqtt_server}:{self.mqtt_port} as '{self.mqtt_client_id}'...", flush=True)
         except Exception as exc:
             print(f"MQTT connect failed: {exc}", flush=True)
+            self.mqtt_client = None
             self.send("\r\n+UUMQTTC: 1,3\r\n")
         finally:
             for path in (ca_path, cert_path, key_path):
                 if path:
                     os.unlink(path)
+
+    def _on_mqtt_connect(self, client, userdata, flags, reason_code, properties):
+        # Fires once the broker acks (or rejects) the CONNECT - the +UUMQTTC
+        # URC (24.5.4) has to be sent from here, not after connect() returns.
+        if reason_code == 0:
+            print(f"MQTT connected to {self.mqtt_server}:{self.mqtt_port} as '{self.mqtt_client_id}'", flush=True)
+            self._set_healthy(True)
+            self.send("\r\n+UUMQTTC: 1,0\r\n")
+        else:
+            print(f"MQTT connect rejected by broker: {reason_code}", flush=True)
+            self.mqtt_client = None
+            self._set_healthy(False)
+            self._abandon(client)
+            self.send("\r\n+UUMQTTC: 1,3\r\n")
+
+    def _on_mqtt_disconnect(self, client, userdata, flags, reason_code, properties):
+        print(f"MQTT disconnected: {reason_code}", flush=True)
+        self._set_healthy(False)
+
+    @staticmethod
+    def _abandon(client):
+        # loop_stop() joins the network thread - calling it here would
+        # deadlock, since this callback runs on that same thread.
+        threading.Thread(target=client.loop_stop, daemon=True).start()
 
     def mqtt_disconnect(self):
         if self.mqtt_client:
@@ -250,8 +304,8 @@ class Modem:
             self.mqtt_client = None
 
     def mqtt_publish(self, topic, message, qos, retain):
-        if not self.mqtt_client:
-            print("Publish requested but MQTT is not connected, dropping", flush=True)
+        if not self.mqtt_client or not self.mqtt_client.is_connected():
+            print(f"Publish to '{topic}' requested but MQTT is not connected, dropping", flush=True)
             return
         self.mqtt_client.publish(topic, message, qos=qos, retain=bool(retain))
         print(f"Published to '{topic}': {message}", flush=True)
@@ -261,6 +315,9 @@ def connect():
     while True:
         try:
             sock = socket.create_connection((RENODE_HOST, RENODE_PORT), timeout=10)
+            # create_connection()'s timeout lingers on the socket for every
+            # future recv() too - clear it so idle gaps aren't mistaken for a dead link.
+            sock.settimeout(None)
             print(f"Connected to Renode UART1 relay at {RENODE_HOST}:{RENODE_PORT}", flush=True)
             return sock
         except OSError as exc:

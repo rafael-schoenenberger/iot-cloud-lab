@@ -7,4 +7,9 @@ RUN useradd -m modem-sim
 USER modem-sim
 WORKDIR /workspace
 
+# healthy = a real MQTT session is up (see _set_healthy) - lets --wait
+# catch a stale device cert instead of a false "running".
+HEALTHCHECK --interval=2s --timeout=2s --start-period=60s --retries=3 \
+    CMD test -f /tmp/mqtt_healthy || exit 1
+
 CMD ["python3", "sim_sara_r412m.py"]

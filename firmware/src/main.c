@@ -22,6 +22,11 @@ static UART_HandleTypeDef huart1;
 static I2C_HandleTypeDef hi2c1;
 static QueueHandle_t qSensorData;
 
+typedef struct {
+    int8_t temp_c;
+    uint32_t uptime_ms; /* HAL_GetTick() at the moment the sample was read on I2C */
+} SensorSample_t;
+
 /* UART1 RX: interrupt-driven, one byte at a time, fed into a StreamBuffer
  * so ModemTask can block (xStreamBufferReceive) instead of polling for AT
  * responses - see HAL_UART_RxCpltCallback/USART1_IRQHandler below. */
@@ -374,8 +379,7 @@ static void HWTask(void *argument)
 static void TempTask(void *argument)
 {
     (void)argument;
-    char msg[32];
-    int count = 0;
+    char msg[64];
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -387,11 +391,13 @@ static void TempTask(void *argument)
             continue;
         }
 
-        int len = snprintf(msg, sizeof(msg), "{\"temp_c\":%d,\"count\":%d}\r\n",
-                            raw, ++count);
+        SensorSample_t sample = { .temp_c = raw, .uptime_ms = HAL_GetTick() };
+
+        int len = snprintf(msg, sizeof(msg), "{\"temp_c\":%d,\"uptime_ms\":%lu}\r\n",
+                            sample.temp_c, (unsigned long)sample.uptime_ms);
         HAL_UART_Transmit(&huart3, (uint8_t *)msg, (uint16_t)len, HAL_MAX_DELAY);
 
-        xQueueSend(qSensorData, &raw, 0); /* 0 timeout: skip if still full */
+        xQueueSend(qSensorData, &sample, 0); /* 0 timeout: skip if still full */
     }
 }
 
@@ -445,12 +451,13 @@ static void ModemTask(void *argument)
     at_wait_for("+UUMQTTC: 1,0", 30000); /* async connect result (24.5.4) */
 
     for (;;) {
-        int8_t raw;
-        xQueueReceive(qSensorData, &raw, portMAX_DELAY);
+        SensorSample_t sample;
+        xQueueReceive(qSensorData, &sample, portMAX_DELAY);
 
-        char json[32];
-        snprintf(json, sizeof(json), "{\"temp_c\":%d}", raw);
-        char hex[64];
+        char json[48];
+        snprintf(json, sizeof(json), "{\"temp_c\":%d,\"uptime_ms\":%lu}",
+                 sample.temp_c, (unsigned long)sample.uptime_ms);
+        char hex[96];
         hex_encode(json, hex, sizeof(hex));
 
         snprintf(cmd, sizeof(cmd), "AT+UMQTTC=2,0,0,1,\"%s\",\"%s\"\r\n", AWS_MQTT_TOPIC, hex);
@@ -467,7 +474,7 @@ int main(void)
     i2c1_init();
     uart1_init();
 
-    qSensorData = xQueueCreate(4, sizeof(int8_t));
+    qSensorData = xQueueCreate(4, sizeof(SensorSample_t));
     configASSERT(qSensorData != NULL);
 
     // configASSERT(xTaskCreate(HWTask, "HWTask", 256, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
