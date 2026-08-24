@@ -12,6 +12,18 @@ services:
       sh -c "cmake -S /workspace/src -B /workspace/build -G Ninja &&
       ninja -C /workspace/build"
 
+  docs:
+    profiles: ["docs"]
+    build:
+      context: ../firmware
+      dockerfile: Dockerfile.sources
+    image: firmware:latest
+    volumes:
+      - ../firmware/src:/workspace/src
+      - ../firmware/Doxyfile:/workspace/Doxyfile
+      - ../firmware/build:/workspace/build
+    command: doxygen Doxyfile
+
   renode:
     build:
       context: ../renode

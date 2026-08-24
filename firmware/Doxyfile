@@ -1,0 +1,19 @@
+PROJECT_NAME           = "iot-cloud-lab firmware"
+OUTPUT_DIRECTORY       = build/docs
+INPUT                  = src
+RECURSIVE              = YES
+FILE_PATTERNS          = *.c *.h
+
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+JAVADOC_AUTOBRIEF      = NO
+
+GENERATE_LATEX         = NO
+GENERATE_HTML          = YES
+
+HAVE_DOT               = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = YES

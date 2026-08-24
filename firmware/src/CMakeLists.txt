@@ -52,6 +52,9 @@ add_compile_definitions(STM32F407xx USE_HAL_DRIVER)
 
 include_directories(
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/modem
+    ${CMAKE_SOURCE_DIR}/sensor
+    ${CMAKE_SOURCE_DIR}/peripherals
     ${HAL_DIR}/Inc
     ${CMSIS_DEVICE_DIR}/Include
     ${CMSIS_CORE_DIR}/Core/Include
@@ -89,4 +92,9 @@ add_executable(firmware.elf
     ${FREERTOS_DIR}/portable/GCC/ARM_CM3/port.c
     ${FREERTOS_DIR}/portable/MemMang/heap_4.c
     main.c
+    peripherals/system_clock.c
+    peripherals/uart.c
+    peripherals/i2c.c
+    sensor/sensor.c
+    modem/modem.c
 )
