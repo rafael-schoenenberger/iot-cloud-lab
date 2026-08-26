@@ -1,5 +1,6 @@
 # firmware build artifacts (cmake/ninja output, generated on every build)
 firmware/build/*
+firmware/build_unit_tests/*
 
 # Python bytecode cache (temp-sim/, modem-sim/)
 __pycache__/

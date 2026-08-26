@@ -1,13 +1,30 @@
 FROM ubuntu:22.04
 
-# Toolchain + build tools
+# Toolchain + build tools. doxygen/cppcheck are intentionally NOT installed
+# from here - Ubuntu 22.04's apt archive is stuck on doxygen 1.9.1 and
+# cppcheck 2.7, both years behind upstream; see below instead.
 RUN apt-get update && apt-get install -y \
-    build-essential cmake ninja-build git \
+    build-essential cmake ninja-build git curl ca-certificates \
     gcc-arm-none-eabi gdb-multiarch \
-    doxygen graphviz \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd -m firmware
+    graphviz \
+    && rm -rf /var/lib/apt/lists/*
 
+# Doxygen 1.18.0 (latest stable release as of this writing) - official
+# prebuilt Linux binary, verified to run as-is on Ubuntu 22.04.
+RUN curl -fsSL https://github.com/doxygen/doxygen/releases/download/Release_1_18_0/doxygen-1.18.0.linux.bin.tar.gz \
+    | tar xz -C /opt \
+    && ln -s /opt/doxygen-1.18.0/bin/doxygen /usr/local/bin/doxygen
+
+# cppcheck 2.21.0 (latest stable release as of this writing) - no prebuilt
+# Linux binary is published upstream, so built from source instead; only
+# needs the build-essential/cmake already installed above.
+RUN git clone --depth 1 --branch 2.21.0 https://github.com/danmar/cppcheck.git /tmp/cppcheck \
+    && cmake -S /tmp/cppcheck -B /tmp/cppcheck/build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /tmp/cppcheck/build -j"$(nproc)" \
+    && cmake --install /tmp/cppcheck/build \
+    && rm -rf /tmp/cppcheck
+
+RUN useradd -m firmware
 USER firmware
 WORKDIR /workspace
 

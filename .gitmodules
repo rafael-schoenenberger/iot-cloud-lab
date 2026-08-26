@@ -10,3 +10,6 @@
 [submodule "firmware/vendor/freertos_kernel"]
 	path = firmware/vendor/freertos_kernel
 	url = https://github.com/FreeRTOS/FreeRTOS-Kernel.git
+[submodule "firmware/unit_tests/vendor/unity"]
+	path = firmware/unit_tests/vendor/unity
+	url = https://github.com/ThrowTheSwitch/Unity.git

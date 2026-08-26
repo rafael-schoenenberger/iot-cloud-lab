@@ -1,6 +1,7 @@
 PROJECT_NAME           = "iot-cloud-lab firmware"
 OUTPUT_DIRECTORY       = build/docs
-INPUT                  = src
+INPUT                  = src unit_tests
+EXCLUDE                = unit_tests/vendor
 RECURSIVE              = YES
 FILE_PATTERNS          = *.c *.h
 

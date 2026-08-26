@@ -9,6 +9,10 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 project(firmware C ASM)
 
+# Kept in sync with unit_tests/CMakeLists.txt's CMAKE_C_STANDARD - modem_payload.c
+# is compiled by both this (ARM cross) and that (native) build.
+set(CMAKE_C_STANDARD 11)
+
 set(VENDOR_DIR ${CMAKE_SOURCE_DIR}/../vendor)
 set(HAL_DIR ${VENDOR_DIR}/stm32f4xx_hal_driver)
 set(CMSIS_DEVICE_DIR ${VENDOR_DIR}/cmsis_device_f4)
@@ -97,4 +101,5 @@ add_executable(firmware.elf
     peripherals/i2c.c
     sensor/sensor.c
     modem/modem.c
+    modem/modem_payload.c
 )

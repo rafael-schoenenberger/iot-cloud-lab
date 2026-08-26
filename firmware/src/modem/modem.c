@@ -4,15 +4,15 @@
   * @author  schoenenberger <rafael@schoenenberger.dev>
   * @date    2026-08-24
   * @brief   AT command helpers for the SARA-R412M modem (send/wait, blocking
-  *          line reads, certificate upload, hex-encoding for MQTT publish)
-  *          and ModemTask, which drives network attach, TLS/certificate
-  *          provisioning, MQTT connect and the publish loop.
+  *          line reads, cert upload) and ModemTask (network/TLS/MQTT bring-up
+  *          + publish loop - payload building lives in modem_payload.c/.h).
   ******************************************************************************
   */
 
 #include "modem.h"
 #include "uart.h"
 #include "sensor.h"
+#include "modem_payload.h"
 #include "aws_certs.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -103,28 +103,6 @@ static bool at_send_cert(int type, const char *internal_name, const char *data, 
 }
 
 /**
-  * @brief  Hex-encodes `in` into `out`. AT+UMQTTC's publish command takes the
-  *         message as a quoted string parameter, but our payloads are JSON
-  *         containing literal '"' characters, which a quoted-parameter AT
-  *         parser cannot tell apart from the closing quote. Hex-encoding
-  *         (hex_mode=1, see 24.5.3) sidesteps that entirely.
-  * @param  in NUL-terminated input string.
-  * @param  out Buffer receiving the NUL-terminated hex string.
-  * @param  out_size Size of `out` in bytes.
-  * @retval None
-  */
-static void hex_encode(const char *in, char *out, size_t out_size)
-{
-    static const char hex_chars[] = "0123456789abcdef";
-    size_t i = 0;
-    for (; in[i] != '\0' && (i * 2 + 2) < out_size; i++) {
-        out[i * 2] = hex_chars[((uint8_t)in[i] >> 4) & 0xF];
-        out[i * 2 + 1] = hex_chars[(uint8_t)in[i] & 0xF];
-    }
-    out[i * 2] = '\0';
-}
-
-/**
   * @brief  Brings up the SARA-R412M modem (network attach, certificate
   *         upload, TLS profile, MQTT connect), then loops forever publishing
   *         every SensorSample_t received from qSensorData to AWS IoT.
@@ -184,13 +162,7 @@ void ModemTask(void *argument)
         SensorSample_t sample;
         xQueueReceive(qSensorData, &sample, portMAX_DELAY);
 
-        char json[48];
-        snprintf(json, sizeof(json), "{\"temp_c\":%d,\"uptime_ms\":%lu}",
-                 sample.temp_c, (unsigned long)sample.uptime_ms);
-        char hex[96];
-        hex_encode(json, hex, sizeof(hex));
-
-        snprintf(cmd, sizeof(cmd), "AT+UMQTTC=2,0,0,1,\"%s\",\"%s\"\r\n", AWS_MQTT_TOPIC, hex);
+        modem_build_publish_cmd(sample, cmd, sizeof(cmd));
         at_send(cmd);
         at_wait_ok(5000);
     }

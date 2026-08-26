@@ -3,8 +3,9 @@
   * @file    sensor.h
   * @author  schoenenberger <rafael@schoenenberger.dev>
   * @date    2026-08-24
-  * @brief   Sensor sample type, the queue handing samples off to ModemTask,
-  *          and the periodic TMP108 read task.
+  * @brief   Re-exposes SensorSample_t (see sensor_types.h), the queue
+  *          handing samples off to ModemTask, and the periodic TMP108 read
+  *          task.
   ******************************************************************************
   */
 
@@ -13,13 +14,12 @@
 
 #include "FreeRTOS.h"
 #include "queue.h"
-#include <stdint.h>
+#include "sensor_types.h"
 
-typedef struct {
-    int8_t temp_c;
-    uint32_t uptime_ms; /* HAL_GetTick() at the moment the sample was read on I2C */
-} SensorSample_t;
-
+/**
+  * @brief  Queue of SensorSample_t values: filled by TempTask, drained by
+  *         ModemTask.
+  */
 extern QueueHandle_t qSensorData;
 
 /**
