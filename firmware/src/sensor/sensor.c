@@ -46,7 +46,9 @@ void TempTask(void *argument)
 
         int len = snprintf(msg, sizeof(msg), "{\"temp_c\":%d,\"uptime_ms\":%lu}\r\n",
                             sample.temp_c, (unsigned long)sample.uptime_ms);
-        HAL_UART_Transmit(&huart3, (uint8_t *)msg, (uint16_t)len, HAL_MAX_DELAY);
+        /* No completion wait: msg isn't reused until the next 2s loop, far
+         * longer than this ~64-byte transfer takes. */
+        HAL_UART_Transmit_DMA(&huart3, (uint8_t *)msg, (uint16_t)len);
 
         xQueueSend(qSensorData, &sample, 0); /* 0 timeout: skip if still full */
     }

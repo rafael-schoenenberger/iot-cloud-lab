@@ -4,9 +4,9 @@
   * @author  schoenenberger <rafael@schoenenberger.dev>
   * @date    2026-08-24
   * @brief   USART3 (debug console) and USART1 (SARA-R412M modem link)
-  *          initialization, ISR-driven single-byte RX for USART1, and
-  *          blocking helpers for reading AT command responses out of the
-  *          resulting RX stream buffer.
+  *          initialization, DMA-driven TX for both, ISR-driven single-byte
+  *          RX for USART1, and blocking helpers for reading AT command
+  *          responses out of the resulting RX stream buffer.
   ******************************************************************************
   */
 
@@ -24,6 +24,13 @@ UART_HandleTypeDef huart1;
 static StreamBufferHandle_t xUart1Rx;
 static uint8_t uart1_rx_byte;
 
+/* UART1/UART3 TX: DMA-driven (DMA2 Stream7 / DMA1 Stream3). modem.c/sensor.c
+ * start the transfer without waiting for it to complete. The IRQ handlers
+ * below still must run so HAL's internal state resets for the next
+ * transmit. */
+static DMA_HandleTypeDef hdma_usart1_tx;
+static DMA_HandleTypeDef hdma_usart3_tx;
+
 /**
   * @brief  USART1 global interrupt handler, forwarded to the HAL.
   * @retval None
@@ -31,6 +38,37 @@ static uint8_t uart1_rx_byte;
 void USART1_IRQHandler(void)
 {
     HAL_UART_IRQHandler(&huart1);
+}
+
+/**
+  * @brief  USART3 global interrupt handler, forwarded to the HAL. Required
+  *         so HAL_UART_Transmit_DMA() resets its busy state after the DMA
+  *         hands off - see UART_DMATransmitCplt() in stm32f4xx_hal_uart.c.
+  * @retval None
+  */
+void USART3_IRQHandler(void)
+{
+    HAL_UART_IRQHandler(&huart3);
+}
+
+/**
+  * @brief  DMA2 Stream7 global interrupt handler (USART1 TX), forwarded to
+  *         the HAL.
+  * @retval None
+  */
+void DMA2_Stream7_IRQHandler(void)
+{
+    HAL_DMA_IRQHandler(&hdma_usart1_tx);
+}
+
+/**
+  * @brief  DMA1 Stream3 global interrupt handler (USART3 TX), forwarded to
+  *         the HAL.
+  * @retval None
+  */
+void DMA1_Stream3_IRQHandler(void)
+{
+    HAL_DMA_IRQHandler(&hdma_usart3_tx);
 }
 
 /**
@@ -73,6 +111,30 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
         gpio.Speed = GPIO_SPEED_FREQ_HIGH;
         gpio.Alternate = GPIO_AF7_USART3;
         HAL_GPIO_Init(GPIOB, &gpio);
+
+        /* DMA1 Stream3/Channel4 = USART3_TX (RM0090 Table 42), used by
+         * HAL_UART_Transmit_DMA() for the debug prints in sensor.c. */
+        __HAL_RCC_DMA1_CLK_ENABLE();
+
+        hdma_usart3_tx.Instance = DMA1_Stream3;
+        hdma_usart3_tx.Init.Channel = DMA_CHANNEL_4;
+        hdma_usart3_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
+        hdma_usart3_tx.Init.PeriphInc = DMA_PINC_DISABLE;
+        hdma_usart3_tx.Init.MemInc = DMA_MINC_ENABLE;
+        hdma_usart3_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+        hdma_usart3_tx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+        hdma_usart3_tx.Init.Mode = DMA_NORMAL;
+        hdma_usart3_tx.Init.Priority = DMA_PRIORITY_LOW;
+        hdma_usart3_tx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+        HAL_DMA_Init(&hdma_usart3_tx);
+        __HAL_LINKDMA(huart, hdmatx, hdma_usart3_tx);
+        HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 6, 0);
+        HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+
+        /* Needed for the DMA-TX completion handshake, not for RX (USART3 is
+         * TX-only here) - see USART3_IRQHandler. */
+        HAL_NVIC_SetPriority(USART3_IRQn, 6, 0);
+        HAL_NVIC_EnableIRQ(USART3_IRQn);
         return;
     }
 
@@ -89,8 +151,28 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
         gpio.Alternate = GPIO_AF7_USART1;
         HAL_GPIO_Init(GPIOA, &gpio);
 
-        /* Priority 6: numerically >= configMAX_SYSCALL_INTERRUPT_PRIORITY,
-         * required for the ISR above to safely call xStreamBufferSendFromISR(). */
+        /* DMA2 Stream7/Channel4 = USART1_TX (RM0090 Table 43), used by
+         * HAL_UART_Transmit_DMA() for at_send()/at_send_cert() in modem.c. */
+        __HAL_RCC_DMA2_CLK_ENABLE();
+
+        hdma_usart1_tx.Instance = DMA2_Stream7;
+        hdma_usart1_tx.Init.Channel = DMA_CHANNEL_4;
+        hdma_usart1_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
+        hdma_usart1_tx.Init.PeriphInc = DMA_PINC_DISABLE;
+        hdma_usart1_tx.Init.MemInc = DMA_MINC_ENABLE;
+        hdma_usart1_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+        hdma_usart1_tx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+        hdma_usart1_tx.Init.Mode = DMA_NORMAL;
+        hdma_usart1_tx.Init.Priority = DMA_PRIORITY_LOW;
+        hdma_usart1_tx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+        HAL_DMA_Init(&hdma_usart1_tx);
+        __HAL_LINKDMA(huart, hdmatx, hdma_usart1_tx);
+        HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 6, 0);
+        HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
+
+        /* Priority 6 (>= configMAX_SYSCALL_INTERRUPT_PRIORITY): needed for
+         * the RX ISR's xStreamBufferSendFromISR() and, like USART3_IRQn
+         * above, the DMA-TX completion handshake. */
         HAL_NVIC_SetPriority(USART1_IRQn, 6, 0);
         HAL_NVIC_EnableIRQ(USART1_IRQn);
         return;
@@ -98,13 +180,13 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 }
 
 /**
-  * @brief  Initializes USART3 (115200 8N1) used as the debug console.
+  * @brief  Initializes USART3 (921600 8N1) used as the debug console.
   * @retval None
   */
 void uart3_init(void)
 {
     huart3.Instance = USART3;
-    huart3.Init.BaudRate = 115200;
+    huart3.Init.BaudRate = 921600;
     huart3.Init.WordLength = UART_WORDLENGTH_8B;
     huart3.Init.StopBits = UART_STOPBITS_1;
     huart3.Init.Parity = UART_PARITY_NONE;

@@ -97,6 +97,11 @@ class LineReader:
             self._fill()
         idx_candidates = [i for i in (self.buf.find(b"\r"), self.buf.find(b"\n")) if i != -1]
         idx = min(idx_candidates)
+        # A \r\n terminator can arrive split across two TCP reads - wait for
+        # a second byte before deciding whether it's a 1- or 2-byte
+        # terminator, or a stray leftover byte corrupts the next read_exact().
+        while len(self.buf) < idx + 2:
+            self._fill()
         line = self.buf[:idx]
         rest = self.buf[idx:idx + 2]
         skip = 2 if rest in (b"\r\n", b"\n\r") else 1

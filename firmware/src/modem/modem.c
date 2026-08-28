@@ -25,13 +25,14 @@
 #define AWS_APN "iot"
 
 /**
-  * @brief  Sends a raw AT command string on UART1.
+  * @brief  Sends a raw AT command string on UART1 via DMA, without waiting
+  *         for completion - the next response can't arrive before then.
   * @param  cmd NUL-terminated command string, including any trailing CR/LF.
   * @retval None
   */
 static void at_send(const char *cmd)
 {
-    HAL_UART_Transmit(&huart1, (const uint8_t *)cmd, (uint16_t)strlen(cmd), HAL_MAX_DELAY);
+    HAL_UART_Transmit_DMA(&huart1, (const uint8_t *)cmd, (uint16_t)strlen(cmd));
 }
 
 /**
@@ -98,7 +99,8 @@ static bool at_send_cert(int type, const char *internal_name, const char *data, 
         return false;
     }
 
-    HAL_UART_Transmit(&huart1, (const uint8_t *)data, (uint16_t)data_len, HAL_MAX_DELAY);
+    /* No completion wait here either, same reasoning as at_send() above. */
+    HAL_UART_Transmit_DMA(&huart1, (const uint8_t *)data, (uint16_t)data_len);
     return at_wait_ok(5000);
 }
 

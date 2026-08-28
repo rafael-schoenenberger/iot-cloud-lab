@@ -33,6 +33,14 @@ rcc: Miscellaneous.STM32F4_RCC @ sysbus 0x40023800
 // PWR: Power Control
 pwr: Miscellaneous.STM32_PWR @ sysbus 0x40007000
 
+// DMA1/DMA2: only the UART TX streams are wired up (USART3 on DMA1
+// stream3, USART1 on DMA2 stream7) - Renode only models mem-to-periph DMA.
+dma1: DMA.STM32DMA @ sysbus 0x40026000
+    [0-7] -> nvic@[11-17,47]
+
+dma2: DMA.STM32DMA @ sysbus 0x40026400
+    [0-7] -> nvic@[56-60,68-70]
+
 // UART1: Modem (SARA-R412M) - no Renode model, raw UART only, todo
 uart1: UART.STM32_UART @ sysbus <0x40011000, +0x100>
     -> nvic@37
