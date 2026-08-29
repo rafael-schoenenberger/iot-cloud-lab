@@ -20,13 +20,6 @@
 #define TARGET_RENODE 1
 #endif
 
-/**
-  * @brief  Configures the system clock tree: HSE = 25 MHz -> PLL ->
-  *         SYSCLK = 168 MHz, APB1 = 42 MHz, APB2 = 84 MHz. The PLL enable
-  *         sequence differs between Renode and real hardware - see
-  *         TARGET_RENODE above.
-  * @retval None
-  */
 void SystemClock_Config(void);
 
 #endif /* SYSTEM_CLOCK_H */

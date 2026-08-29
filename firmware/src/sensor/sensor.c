@@ -18,6 +18,10 @@
 
 #define TMP108_ADDR 0x48
 
+/* Generous vs. millisecond-scale UART3 DMA transfers - only matters if a
+ * previous transfer never completes (e.g. a hardware fault). */
+#define UART3_TX_TIMEOUT_MS 1000
+
 QueueHandle_t qSensorData;
 
 /**
@@ -46,9 +50,7 @@ void TempTask(void *argument)
 
         int len = snprintf(msg, sizeof(msg), "{\"temp_c\":%d,\"uptime_ms\":%lu}\r\n",
                             sample.temp_c, (unsigned long)sample.uptime_ms);
-        /* No completion wait: msg isn't reused until the next 2s loop, far
-         * longer than this ~64-byte transfer takes. */
-        HAL_UART_Transmit_DMA(&huart3, (uint8_t *)msg, (uint16_t)len);
+        uart3_transmit_dma((uint8_t *)msg, (uint16_t)len, UART3_TX_TIMEOUT_MS);
 
         xQueueSend(qSensorData, &sample, 0); /* 0 timeout: skip if still full */
     }

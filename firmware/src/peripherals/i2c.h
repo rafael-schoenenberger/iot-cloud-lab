@@ -14,11 +14,6 @@
 
 extern I2C_HandleTypeDef hi2c1;
 
-/**
-  * @brief  Initializes I2C1 (100 kHz standard mode) used to talk to the
-  *         TMP108 temperature sensor.
-  * @retval None
-  */
 void i2c1_init(void);
 
 #endif /* I2C_H */

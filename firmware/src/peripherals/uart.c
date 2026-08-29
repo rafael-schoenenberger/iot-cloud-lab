@@ -13,6 +13,7 @@
 #include "uart.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "semphr.h"
 #include "stream_buffer.h"
 
 UART_HandleTypeDef huart3;
@@ -24,12 +25,14 @@ UART_HandleTypeDef huart1;
 static StreamBufferHandle_t xUart1Rx;
 static uint8_t uart1_rx_byte;
 
-/* UART1/UART3 TX: DMA-driven (DMA2 Stream7 / DMA1 Stream3). modem.c/sensor.c
- * start the transfer without waiting for it to complete. The IRQ handlers
- * below still must run so HAL's internal state resets for the next
- * transmit. */
+/* UART1/UART3 TX: DMA-driven (DMA2 Stream7 / DMA1 Stream3), serialized so a
+ * caller blocks until any previous transfer has completed. UART1 uses a task
+ * notification (xUart1TxTask) since only ModemTask ever calls it; UART3 uses
+ * a real semaphore (xUart3TxSem) since both TempTask and ModemTask do. */
 static DMA_HandleTypeDef hdma_usart1_tx;
 static DMA_HandleTypeDef hdma_usart3_tx;
+static TaskHandle_t xUart1TxTask;
+static SemaphoreHandle_t xUart3TxSem;
 
 /**
   * @brief  USART1 global interrupt handler, forwarded to the HAL.
@@ -41,9 +44,8 @@ void USART1_IRQHandler(void)
 }
 
 /**
-  * @brief  USART3 global interrupt handler, forwarded to the HAL. Required
-  *         so HAL_UART_Transmit_DMA() resets its busy state after the DMA
-  *         hands off - see UART_DMATransmitCplt() in stm32f4xx_hal_uart.c.
+  * @brief  USART3 global interrupt handler, forwarded to the HAL - required
+  *         for HAL's DMA-TX completion handshake (UART_DMATransmitCplt()).
   * @retval None
   */
 void USART3_IRQHandler(void)
@@ -72,10 +74,8 @@ void DMA1_Stream3_IRQHandler(void)
 }
 
 /**
-  * @brief  HAL UART RX-complete callback. Fires once per received byte on
-  *         USART1; uart1_init() re-arms HAL_UART_Receive_IT() for the next
-  *         byte right after handing this one to ModemTask via the stream
-  *         buffer.
+  * @brief  HAL UART RX-complete callback: pushes the received USART1 byte
+  *         into the RX stream buffer and re-arms reception for the next one.
   * @param  huart UART handle that completed reception.
   * @retval None
   */
@@ -92,8 +92,27 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 }
 
 /**
-  * @brief  HAL MSP init callback: configures the GPIO/clock/NVIC for
-  *         whichever UART instance HAL_UART_Init() was called on.
+  * @brief  HAL UART TX-complete callback: frees up USART1/USART3 for the next
+  *         uart{1,3}_transmit_dma() call (see xUart1TxTask/xUart3TxSem above).
+  * @param  huart UART handle that completed transmission.
+  * @retval None
+  */
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (huart->Instance == USART1) {
+        vTaskNotifyGiveFromISR(xUart1TxTask, &xHigherPriorityTaskWoken);
+    } else if (huart->Instance == USART3) {
+        xSemaphoreGiveFromISR(xUart3TxSem, &xHigherPriorityTaskWoken);
+    } else {
+        return;
+    }
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+/**
+  * @brief  HAL MSP init callback: configures GPIO/DMA/NVIC for whichever
+  *         UART instance HAL_UART_Init() was called on.
   * @param  huart UART handle being initialized.
   * @retval None
   */
@@ -194,13 +213,38 @@ void uart3_init(void)
     huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
     huart3.Init.OverSampling = UART_OVERSAMPLING_16;
     HAL_UART_Init(&huart3);
+
+    xUart3TxSem = xSemaphoreCreateBinary();
+    configASSERT(xUart3TxSem != NULL);
+    xSemaphoreGive(xUart3TxSem); /* starts "available" - no transfer in flight yet */
 }
 
 /**
-  * @brief  Initializes USART1 (115200 8N1) used for the SARA-R412M modem
-  *         link, and arms interrupt-driven single-byte reception into the
-  *         internal RX stream buffer consumed by uart1_wait_char() and
-  *         uart1_read_line().
+  * @brief  Sends `len` bytes on UART3 via DMA, blocking until any previous
+  *         transfer has completed (serialized via xUart3TxSem). Safe to call
+  *         from multiple tasks.
+  * @param  data Bytes to send.
+  * @param  len Number of bytes in `data`.
+  * @param  timeout_ms Maximum time to wait for a previous transfer to free
+  *         up the UART.
+  * @retval true if the transfer was started, false on timeout waiting for
+  *         the UART to free up, or a HAL error starting the DMA transfer.
+  */
+bool uart3_transmit_dma(const uint8_t *data, uint16_t len, uint32_t timeout_ms)
+{
+    if (xSemaphoreTake(xUart3TxSem, pdMS_TO_TICKS(timeout_ms)) == pdFALSE) {
+        return false;
+    }
+    if (HAL_UART_Transmit_DMA(&huart3, data, len) != HAL_OK) {
+        xSemaphoreGive(xUart3TxSem);
+        return false;
+    }
+    return true;
+}
+
+/**
+  * @brief  Initializes USART1 (115200 8N1) for the SARA-R412M modem link and
+  *         arms interrupt-driven RX into the internal stream buffer.
   * @retval None
   */
 void uart1_init(void)
@@ -221,9 +265,35 @@ void uart1_init(void)
 }
 
 /**
-  * @brief  Blocks (no polling) until `expected` arrives on UART1 or the
-  *         timeout elapses. Used only for AT+USECMNG's '>' prompt, which -
-  *         unlike every other modem response - is not itself CR/LF-terminated.
+  * @brief  Sends `len` bytes on UART1 via DMA, blocking until any previous
+  *         transfer has completed. Must only ever be called from one task
+  *         (ModemTask) - see xUart1TxTask above.
+  * @param  data Bytes to send.
+  * @param  len Number of bytes in `data`.
+  * @param  timeout_ms Maximum time to wait for a previous transfer to free
+  *         up the UART.
+  * @retval true if the transfer was started, false on timeout waiting for
+  *         the UART to free up, or a HAL error starting the DMA transfer.
+  */
+bool uart1_transmit_dma(const uint8_t *data, uint16_t len, uint32_t timeout_ms)
+{
+    if (xUart1TxTask == NULL) {
+        xUart1TxTask = xTaskGetCurrentTaskHandle();
+        xTaskNotifyGive(xUart1TxTask); /* starts "available" - no transfer in flight yet */
+    }
+    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout_ms)) == 0) {
+        return false;
+    }
+    if (HAL_UART_Transmit_DMA(&huart1, data, len) != HAL_OK) {
+        xTaskNotifyGive(xUart1TxTask);
+        return false;
+    }
+    return true;
+}
+
+/**
+  * @brief  Blocks until `expected` arrives on UART1 or the timeout elapses.
+  *         Used only for AT+USECMNG's '>' prompt (not CR/LF-terminated).
   * @param  expected Character to wait for.
   * @param  timeout_ms Maximum time to wait, in milliseconds.
   * @retval true if `expected` was received, false on timeout.
@@ -250,10 +320,8 @@ bool uart1_wait_char(char expected, uint32_t timeout_ms)
 
 /**
   * @brief  Blocks until one full CR/LF-terminated line arrives on UART1
-  *         (leading/blank lines, e.g. the CR/LF before every response, are
-  *         skipped), or the timeout elapses.
-  * @param  line Buffer receiving the line, left NUL-terminated with the
-  *         terminator stripped.
+  *         (leading/blank lines are skipped), or the timeout elapses.
+  * @param  line Buffer receiving the line, NUL-terminated, terminator stripped.
   * @param  line_size Size of `line` in bytes.
   * @param  timeout_ms Maximum time to wait, in milliseconds.
   * @retval true if a line was received, false on timeout.

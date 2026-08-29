@@ -22,13 +22,6 @@
   */
 extern QueueHandle_t qSensorData;
 
-/**
-  * @brief  Periodically (every 2s) reads the TMP108 over I2C1, prints the
-  *         sample as JSON on UART3, and pushes it onto qSensorData for
-  *         ModemTask to publish.
-  * @param  argument Unused.
-  * @retval None
-  */
 void TempTask(void *argument);
 
 #endif /* SENSOR_H */
