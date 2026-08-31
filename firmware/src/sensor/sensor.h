@@ -5,7 +5,7 @@
   * @date    2026-08-24
   * @brief   Re-exposes SensorSample_t (see sensor_types.h), the queue
   *          handing samples off to ModemTask, and the periodic TMP108 read
-  *          task.
+  *          task
   ******************************************************************************
   */
 
@@ -18,10 +18,9 @@
 
 /**
   * @brief  Queue of SensorSample_t values: filled by TempTask, drained by
-  *         ModemTask.
+  *         ModemTask
   */
 extern QueueHandle_t qSensorData;
-
 void TempTask(void *argument);
 
 #endif /* SENSOR_H */

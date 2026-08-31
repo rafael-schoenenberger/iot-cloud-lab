@@ -1,3 +1,14 @@
+/**
+  ******************************************************************************
+  * @file    FreeRTOSConfig.h
+  * @author  schoenenberger <rafael@schoenenberger.dev>
+  * @date    2026-08-24
+  * @brief   Project-specific FreeRTOS kernel configuration: tick rate, task
+  *          priorities/stack/heap sizing, NVIC priority grouping for the
+  *          Cortex-M4/ARM_CM3 port, and the configASSERT() failure trap
+  ******************************************************************************
+  */
+
 #ifndef FREERTOS_CONFIG_H
 #define FREERTOS_CONFIG_H
 
@@ -37,12 +48,10 @@ extern uint32_t SystemCoreClock;
 #define INCLUDE_xTaskGetSchedulerState         1
 #define INCLUDE_xTaskGetCurrentTaskHandle      1
 
-/* Cortex-M4 with 4 implemented NVIC priority bits (matches Renode's
- * nvic.priorityMask: 0xF0 and TICK_INT_PRIORITY in stm32f4xx_hal_conf.h).
- * The kernel uses the ARM_CM3 port (not ARM_CM4F): CPU_FLAGS in
- * CMakeLists.txt build with -mfloat-abi=soft, so there is no hardware FPU
- * context to lazy-stack. The CM3 port is architecturally identical for a
- * non-FPU build and is FreeRTOS's documented choice for that case. */
+/* Cortex-M4 with 4 implemented NVIC priority bits. Uses the ARM_CM3 port
+ * (not ARM_CM4F), since CMakeLists.txt builds with -mfloat-abi=soft - no
+ * hardware FPU context to lazy-stack, and CM3 is FreeRTOS's documented
+ * choice for a non-FPU build. */
 #define configPRIO_BITS                                4
 #define configLIBRARY_LOWEST_INTERRUPT_PRIORITY        0xf
 #define configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY   5
@@ -51,12 +60,11 @@ extern uint32_t SystemCoreClock;
 #define configMAX_SYSCALL_INTERRUPT_PRIORITY \
     (configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))
 
-#define configASSERT(x) if ((x) == 0) { taskDISABLE_INTERRUPTS(); for( ;; ); }
+#define configASSERT(x) do { if ((x) == 0) { taskDISABLE_INTERRUPTS(); for( ;; ); } } while (0)
 
-/* Let the FreeRTOS port implementations satisfy the weak SVC_Handler/
- * PendSV_Handler symbols in startup_stm32f407xx.s. SysTick_Handler is
- * intentionally NOT remapped here - main.c defines it itself so it can
- * drive both HAL_IncTick() and xPortSysTickHandler(). */
+/* Satisfies the weak SVC_Handler/PendSV_Handler symbols in
+ * startup_stm32f407xx.s. SysTick_Handler is intentionally not remapped -
+ * system_clock.c defines it itself to also drive HAL_IncTick(). */
 #define vPortSVCHandler     SVC_Handler
 #define xPortPendSVHandler  PendSV_Handler
 

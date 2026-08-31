@@ -4,7 +4,7 @@
   * @author  schoenenberger <rafael@schoenenberger.dev>
   * @date    2026-08-24
   * @brief   SARA-R412M modem task: AT command bring-up, TLS/certificate
-  *          provisioning and MQTT publish loop for sensor telemetry.
+  *          provisioning and MQTT publish loop for sensor telemetry
   ******************************************************************************
   */
 

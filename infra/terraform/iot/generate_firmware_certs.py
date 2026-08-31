@@ -5,6 +5,7 @@ apply` (or whenever the AWS IoT Thing/certs change) - this is not part of
 the Docker build, since the firmware image only ever sees the generated
 header, never AWS credentials or Terraform itself."""
 
+import datetime
 import json
 import pathlib
 import subprocess
@@ -41,6 +42,17 @@ def main():
     device_key = (CERTS_DIR / "device.pem.key").read_text()
 
     OUTPUT.write_text(f"""\
+/**
+  ******************************************************************************
+  * @file    aws_certs.h
+  * @author  schoenenberger <rafael@schoenenberger.dev>
+  * @date    {datetime.date.today().isoformat()}
+  * @brief   AWS IoT endpoint/client/topic and the root CA/device cert/device
+  *          key needed for the MQTT-over-TLS connection to AWS IoT Core -
+  *          generated, do not edit by hand (see below)
+  ******************************************************************************
+  */
+
 #ifndef AWS_CERTS_H
 #define AWS_CERTS_H
 

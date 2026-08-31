@@ -5,7 +5,7 @@
   * @date    2026-08-24
   * @brief   Periodic TMP108 temperature read task: samples the sensor over
   *          I2C1, logs it on UART3, and hands it off to ModemTask via
-  *          qSensorData.
+  *          qSensorData
   ******************************************************************************
   */
 
@@ -16,33 +16,43 @@
 #include "task.h"
 #include <stdio.h>
 
-#define TMP108_ADDR 0x48
+/* TMP108 I2C address (7-bit) and the register offset for its temperature
+ * result register (see the TMP108 datasheet) */
+#define TMP108_ADDR     0x48
+#define TMP108_TEMP_REG 0x00
 
 /* Generous vs. millisecond-scale UART3 DMA transfers - only matters if a
- * previous transfer never completes (e.g. a hardware fault). */
+ * previous transfer never completes (e.g. a hardware fault) */
 #define UART3_TX_TIMEOUT_MS 1000
+
+/* How often TempTask samples/publishes, and the buffer for the resulting
+ * JSON debug line ({"temp_c":...,"uptime_ms":...}) */
+#define TEMP_SAMPLE_PERIOD_MS 2000
+#define TEMP_MSG_BUF_LEN      64
 
 QueueHandle_t qSensorData;
 
 /**
   * @brief  Periodically (every 2s) reads the TMP108 over I2C1, prints the
   *         sample as JSON on UART3, and pushes it onto qSensorData for
-  *         ModemTask to publish.
-  * @param  argument Unused.
+  *         ModemTask to publish
+  * @param  argument Unused
   * @retval None
   */
 void TempTask(void *argument)
 {
     (void)argument;
-    char msg[64];
+    char msg[TEMP_MSG_BUF_LEN];
 
-    for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(2000));
+    for(;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(TEMP_SAMPLE_PERIOD_MS));
 
         int8_t raw;
-        if (HAL_I2C_Mem_Read(&hi2c1, TMP108_ADDR << 1, 0x00,
-                              I2C_MEMADD_SIZE_8BIT, (uint8_t *)&raw, 1,
-                              HAL_MAX_DELAY) != HAL_OK) {
+        if(HAL_I2C_Mem_Read(&hi2c1, TMP108_ADDR << 1, TMP108_TEMP_REG,
+                            I2C_MEMADD_SIZE_8BIT, (uint8_t *)&raw, 1,
+                            HAL_MAX_DELAY) != HAL_OK)
+        {
             continue;
         }
 
@@ -50,6 +60,7 @@ void TempTask(void *argument)
 
         int len = snprintf(msg, sizeof(msg), "{\"temp_c\":%d,\"uptime_ms\":%lu}\r\n",
                             sample.temp_c, (unsigned long)sample.uptime_ms);
+
         uart3_transmit_dma((uint8_t *)msg, (uint16_t)len, UART3_TX_TIMEOUT_MS);
 
         xQueueSend(qSensorData, &sample, 0); /* 0 timeout: skip if still full */
