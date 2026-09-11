@@ -41,7 +41,7 @@ services:
       --inline-suppr --suppress=missingIncludeSystem
       --suppress=comparePointers:*/cmsis_gcc.h
       -DSTM32F407xx -DUSE_HAL_DRIVER -D__GNUC__
-      -I src -I src/peripherals -I src/modem -I src/sensor
+      -I src -I src/peripherals -I src/modem -I src/sensor -I src/debug
       -I vendor/stm32f4xx_hal_driver/Inc
       -I vendor/cmsis_device_f4/Include
       -I vendor/cmsis_core/Core/Include
@@ -63,7 +63,8 @@ services:
     command: >
       bash -c "set -o pipefail; { cmake -S /workspace/unit_tests -B /workspace/build_unit_tests -G Ninja &&
       ninja -C /workspace/build_unit_tests &&
-      /workspace/build_unit_tests/test_modem; } 2>&1 | tee /workspace/build/test.log"
+      /workspace/build_unit_tests/test_modem &&
+      /workspace/build_unit_tests/test_debug; } 2>&1 | tee /workspace/build/test.log"
 
   renode:
     build:

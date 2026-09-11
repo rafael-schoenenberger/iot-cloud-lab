@@ -14,6 +14,7 @@
 #include "sensor.h"
 #include "modem_payload.h"
 #include "aws_certs.h"
+#include "debug.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
@@ -21,14 +22,11 @@
 #include <stdio.h>
 #include <string.h>
 
-/* UART1_TX_TIMEOUT_MS covers at_send()/at_send_cert(); UART3_TX_TIMEOUT_MS
- * covers at_send_retry()'s debug output */
+/* Covers at_send()/at_send_cert() */
 #define UART1_TX_TIMEOUT_MS 1000
-#define UART3_TX_TIMEOUT_MS 1000
 
-/* at_send_retry(): retry count, and the buffer for failure debug line */
-#define AT_SEND_MAX_RETRIES  3
-#define AT_SEND_FAIL_MSG_LEN 128
+/* at_send_retry(): retry count before giving up */
+#define AT_SEND_MAX_RETRIES 3
 
 /* at_wait_for()'s per-line receive buffer */
 #define AT_LINE_BUF_LEN 128
@@ -82,15 +80,7 @@ static bool at_send_retry(const char *cmd)
         }
     }
 
-    char msg[AT_SEND_FAIL_MSG_LEN];
-    int len = snprintf(msg, sizeof(msg), "at_send failed after %d attempts: %s\r\n", AT_SEND_MAX_RETRIES, cmd);
-
-    if(len > (int)sizeof(msg) - 1)
-    {
-        len = sizeof(msg) - 1; /* snprintf() returns the untruncated length */
-    }
-
-    uart3_transmit_dma((uint8_t *)msg, (uint16_t)len, UART3_TX_TIMEOUT_MS);
+    DBG("at_send failed after %d attempts: %s\r\n", AT_SEND_MAX_RETRIES, cmd)
 
     return false;
 }

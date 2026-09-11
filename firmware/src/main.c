@@ -17,32 +17,12 @@
 #include "i2c.h"
 #include "sensor.h"
 #include "modem.h"
-#include <stdio.h>
+#include "debug.h"
 
 #define TEMP_TASK_STACK_SIZE  256
 #define MODEM_TASK_STACK_SIZE 512
+#define DEBUG_TASK_STACK_SIZE 256
 #define SENSOR_QUEUE_LEN      4
-
-/**
-  * @brief  Demo task that periodically prints a counter over UART3. Not
-  *         started (see the commented-out xTaskCreate() in main() below) -
-  *         kept around as a minimal known-good UART3 smoke test
-  * @param  argument Unused
-  * @retval None
-  */
-static void HWTask(void *argument)
-{
-    (void)argument;
-    char msg[32];
-    int count = 0;
-
-    for(;;)
-    {
-        vTaskDelay(pdMS_TO_TICKS(2000));
-        int len = snprintf(msg, sizeof(msg), "Hello World #%d\r\n", ++count);
-        HAL_UART_Transmit(&huart3, (uint8_t *)msg, (uint16_t)len, HAL_MAX_DELAY);
-    }
-}
 
 /**
   * @brief  Application entry point. Brings up the HAL and system clock,
@@ -64,9 +44,12 @@ int main(void)
     qSensorData = xQueueCreate(SENSOR_QUEUE_LEN, sizeof(SensorSample_t));
     configASSERT(qSensorData != NULL);
 
-    // configASSERT(xTaskCreate(HWTask, "HWTask", 256, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
+    qDebugLog = xQueueCreate(DEBUG_QUEUE_LEN, sizeof(DebugMsg_t));
+    configASSERT(qDebugLog != NULL);
+
     configASSERT(xTaskCreate(TempTask, "TempTask", TEMP_TASK_STACK_SIZE, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
     configASSERT(xTaskCreate(ModemTask, "ModemTask", MODEM_TASK_STACK_SIZE, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
+    configASSERT(xTaskCreate(DebugTask, "DebugTask", DEBUG_TASK_STACK_SIZE, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
 
     vTaskStartScheduler();
 

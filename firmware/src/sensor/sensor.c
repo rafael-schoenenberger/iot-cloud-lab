@@ -10,25 +10,18 @@
   */
 
 #include "sensor.h"
-#include "uart.h"
 #include "i2c.h"
+#include "debug.h"
 #include "stm32f4xx_hal.h"
 #include "task.h"
-#include <stdio.h>
 
 /* TMP108 I2C address (7-bit) and the register offset for its temperature
  * result register (see the TMP108 datasheet) */
 #define TMP108_ADDR     0x48
 #define TMP108_TEMP_REG 0x00
 
-/* Generous vs. millisecond-scale UART3 DMA transfers - only matters if a
- * previous transfer never completes (e.g. a hardware fault) */
-#define UART3_TX_TIMEOUT_MS 1000
-
-/* How often TempTask samples/publishes, and the buffer for the resulting
- * JSON debug line ({"temp_c":...,"uptime_ms":...}) */
+/* How often TempTask samples/publishes */
 #define TEMP_SAMPLE_PERIOD_MS 2000
-#define TEMP_MSG_BUF_LEN      64
 
 QueueHandle_t qSensorData;
 
@@ -42,7 +35,6 @@ QueueHandle_t qSensorData;
 void TempTask(void *argument)
 {
     (void)argument;
-    char msg[TEMP_MSG_BUF_LEN];
 
     for(;;)
     {
@@ -58,10 +50,7 @@ void TempTask(void *argument)
 
         SensorSample_t sample = { .temp_c = raw, .uptime_ms = HAL_GetTick() };
 
-        int len = snprintf(msg, sizeof(msg), "{\"temp_c\":%d,\"uptime_ms\":%lu}\r\n",
-                            sample.temp_c, (unsigned long)sample.uptime_ms);
-
-        uart3_transmit_dma((uint8_t *)msg, (uint16_t)len, UART3_TX_TIMEOUT_MS);
+        DBG("{\"temp_c\":%d,\"uptime_ms\":%lu}\r\n", sample.temp_c, (unsigned long)sample.uptime_ms)
 
         xQueueSend(qSensorData, &sample, 0); /* 0 timeout: skip if still full */
     }

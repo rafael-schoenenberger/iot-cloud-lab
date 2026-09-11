@@ -10,7 +10,7 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 project(firmware C ASM)
 
 # Kept in sync with unit_tests/CMakeLists.txt's CMAKE_C_STANDARD - modem_payload.c
-# is compiled by both this (ARM cross) and that (native) build.
+# and debug_format.c are compiled by both this (ARM cross) and that (native) build.
 set(CMAKE_C_STANDARD 11)
 
 set(VENDOR_DIR ${CMAKE_SOURCE_DIR}/../vendor)
@@ -52,13 +52,14 @@ set(FREERTOS_DIR ${VENDOR_DIR}/freertos_kernel)
 set(CPU_FLAGS -mcpu=cortex-m4 -mthumb -mfloat-abi=soft)
 
 add_compile_options(${CPU_FLAGS} -Wall -O0 -g -ffunction-sections -fdata-sections)
-add_compile_definitions(STM32F407xx USE_HAL_DRIVER)
+add_compile_definitions(STM32F407xx USE_HAL_DRIVER DEBUG=1)
 
 include_directories(
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/modem
     ${CMAKE_SOURCE_DIR}/sensor
     ${CMAKE_SOURCE_DIR}/peripherals
+    ${CMAKE_SOURCE_DIR}/debug
     ${HAL_DIR}/Inc
     ${CMSIS_DEVICE_DIR}/Include
     ${CMSIS_CORE_DIR}/Core/Include
@@ -102,4 +103,6 @@ add_executable(firmware.elf
     sensor/sensor.c
     modem/modem.c
     modem/modem_payload.c
+    debug/debug.c
+    debug/debug_format.c
 )
