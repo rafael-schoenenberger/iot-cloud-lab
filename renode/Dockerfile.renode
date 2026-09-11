@@ -1,25 +1,38 @@
 # Build: download and extract renode
-FROM ubuntu:22.04 AS builder
+# Pinned by digest (not just the "22.04" tag) for byte-identical rebuilds
+FROM ubuntu:22.04@sha256:829f6df217bcbae2b371026e81711d1a787c61b2967ad09d015063663ebafbf7 AS builder
 
 ARG RENODE_VERSION=1.16.1
 
-# Install tools required for downloading and unpacking renode
-RUN apt-get update && apt-get install -y wget \
+# Install tools required for downloading and unpacking renode. Version
+# pinned to the exact candidate resolved on this base image - bump
+# deliberately, don't let it silently drift on a later rebuild.
+RUN apt-get update && apt-get install -y wget=1.21.2-2ubuntu1.5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and extract renode portable package (self-contained, bundles the .NET runtime)
+# Download+extract renode (self-contained, bundles the .NET runtime). SHA256
+# confirmed against GitHub's own release-asset digest before pinning it -
+# tied to RENODE_VERSION=1.16.1, update together if that ARG is bumped.
 RUN mkdir -p /opt/renode \
-    && wget https://github.com/renode/renode/releases/download/v${RENODE_VERSION}/renode-${RENODE_VERSION}.linux-portable-dotnet.tar.gz \
+    && wget -q https://github.com/renode/renode/releases/download/v${RENODE_VERSION}/renode-${RENODE_VERSION}.linux-portable-dotnet.tar.gz \
+    && echo "00e113cdbd0f5354cf2f64bbe3f5a070d8958409542fca66e45ac97d982938c0  renode-${RENODE_VERSION}.linux-portable-dotnet.tar.gz" > renode.sha256 \
+    && sha256sum -c renode.sha256 \
+    && rm renode.sha256 \
     && tar xzf renode-${RENODE_VERSION}.linux-portable-dotnet.tar.gz -C /opt/renode --strip-components=1 \
     && rm renode-${RENODE_VERSION}.linux-portable-dotnet.tar.gz
 
 # Runtime: full-feature renode environment
-FROM ubuntu:22.04
+# Pinned by digest (not just the "22.04" tag) for byte-identical rebuilds
+FROM ubuntu:22.04@sha256:829f6df217bcbae2b371026e81711d1a787c61b2967ad09d015063663ebafbf7
 
-# Install python dependencies + libicu (the .NET runtime needs it for globalization,
-# even though the portable-dotnet package is otherwise self-contained)
+# python3/pip: renode's Robot testing framework. libicu: the .NET runtime
+# needs it for globalization, despite being otherwise self-contained.
+# Versions pinned to the exact candidates resolved on this base image -
+# bump deliberately, don't drift.
 RUN apt-get update && apt-get install -y \
-    python3 python3-pip libicu70 \
+    python3=3.10.6-1~22.04.1 \
+    python3-pip=22.0.2+dfsg-1ubuntu0.7 \
+    libicu70=70.1-2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy renode from builder stage
@@ -28,12 +41,20 @@ COPY --from=builder /opt/renode /opt/renode
 # Add renode to PATH
 ENV PATH="/opt/renode:${PATH}"
 
-# Create non-root user
+# Dedicated non-root user, no login shell/password needed
 RUN useradd -m renode
-USER renode
 
-# Set working directory
+# Drop root for everything from here on
+USER renode
 WORKDIR /workspace
+
+# Standard OCI annotation keys - only on this final stage, not the discarded
+# "builder" stage. BUILD_DATE comes from docker-compose.yml's build.args.
+# Placed at the end so it doesn't invalidate the cache for the layers above.
+ARG BUILD_DATE="unknown"
+LABEL org.opencontainers.image.authors="schoenenberger <rafael@schoenenberger.dev>" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.description="STM32F407 simulator (Renode) image. Used by the renode service in compose/docker-compose.yml."
 
 # Start renode by default
 CMD ["renode"]

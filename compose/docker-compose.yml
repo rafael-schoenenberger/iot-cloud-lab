@@ -1,8 +1,19 @@
+# Orchestrates the simulation stack: builds firmware, runs it in Renode,
+# and simulates its two peripherals (TMP108, SARA-R412M modem) - see
+# README.md. docs/lint/unit-test are optional, profile-gated add-ons.
+
+# Every service below is invoked from run.ps1 - either implicitly via
+# "up" (firmware-build, renode, temp-sim, modem-sim) or explicitly via
+# "--profile <name> run" (docs, lint, unit-test).
 services:
+  # One-shot: compiles firmware.elf via CMake/Ninja, then exits. renode
+  # below waits for this to finish successfully before it starts
   firmware-build:
     build:
       context: ../firmware
       dockerfile: Dockerfile.sources
+      args:
+        BUILD_DATE: ${BUILD_DATE}
     image: firmware:latest
     volumes:
       - ../firmware/src:/workspace/src
@@ -12,11 +23,15 @@ services:
       sh -c "cmake -S /workspace/src -B /workspace/build -G Ninja &&
       ninja -C /workspace/build"
 
+  # One-shot: generates the Doxygen HTML docs for firmware/src. Gated behind
+  # the "docs" profile - not started by a plain "docker compose up"
   docs:
     profiles: ["docs"]
     build:
       context: ../firmware
       dockerfile: Dockerfile.sources
+      args:
+        BUILD_DATE: ${BUILD_DATE}
     image: firmware:latest
     volumes:
       - ../firmware/src:/workspace/src
@@ -25,11 +40,16 @@ services:
       - ../firmware/build:/workspace/build
     command: doxygen Doxyfile
 
+  # One-shot: runs cppcheck over firmware/src. Gated behind the "lint"
+  # profile - informational only, its exit code is never checked (see
+  # run.ps1's Invoke-QualityChecks)
   lint:
     profiles: ["lint"]
     build:
       context: ../firmware
       dockerfile: Dockerfile.sources
+      args:
+        BUILD_DATE: ${BUILD_DATE}
     image: firmware:latest
     volumes:
       - ../firmware/src:/workspace/src
@@ -40,7 +60,7 @@ services:
       --enable=warning,style,performance,portability --std=c11
       --inline-suppr --suppress=missingIncludeSystem
       --suppress=comparePointers:*/cmsis_gcc.h
-      -DSTM32F407xx -DUSE_HAL_DRIVER -D__GNUC__
+      -DSTM32F407xx -DUSE_HAL_DRIVER -DDEBUG=1 -D__GNUC__
       -I src -I src/peripherals -I src/modem -I src/sensor -I src/debug
       -I vendor/stm32f4xx_hal_driver/Inc
       -I vendor/cmsis_device_f4/Include
@@ -49,11 +69,16 @@ services:
       -I vendor/freertos_kernel/portable/GCC/ARM_CM3
       src 2>&1 | tee /workspace/build/lint.log"
 
+  # One-shot: builds/runs the native Unity tests (modem_payload/debug_format).
+  # Unlike docs/lint, its exit code DOES propagate (pipefail) - a real
+  # failure stops run.ps1 before it touches the AWS/MQTT stack below
   unit-test:
     profiles: ["unit-test"]
     build:
       context: ../firmware
       dockerfile: Dockerfile.sources
+      args:
+        BUILD_DATE: ${BUILD_DATE}
     image: firmware:latest
     volumes:
       - ../firmware/src:/workspace/src
@@ -66,41 +91,57 @@ services:
       /workspace/build_unit_tests/test_modem &&
       /workspace/build_unit_tests/test_debug; } 2>&1 | tee /workspace/build/test.log"
 
+  # The STM32F407 simulator - loads and runs firmware.elf. Exposes 4 ports:
+  # 3333 (GDB), 9002 (UART3 debug console, PuTTY via run.ps1), 9005
+  # (Renode's own monitor), 9006 (UART1 modem link, used by modem-sim below)
   renode:
     build:
       context: ../renode
       dockerfile: Dockerfile.renode
+      args:
+        BUILD_DATE: ${BUILD_DATE}
     image: renode:latest
     volumes:
-      - ../renode/boards:/workspace/boards
-      - ../renode/scripts:/workspace/scripts
-      - ../firmware/build:/workspace/build
+      - ../renode/boards:/workspace/boards:ro
+      - ../renode/scripts:/workspace/scripts:ro
+      - ../firmware/build:/workspace/build:ro
+    # Bound to 127.0.0.1 only - 3333/9005 are effectively remote-control
+    # interfaces (GDB, Renode's monitor) and shouldn't be reachable from
+    # elsewhere on the network.
     ports:
-      - "3333:3333"
-      - "9002:9002"
-      - "9005:9005"
-      - "9006:9006"
+      - "127.0.0.1:3333:3333"
+      - "127.0.0.1:9002:9002"
+      - "127.0.0.1:9005:9005"
+      - "127.0.0.1:9006:9006"
     depends_on:
       firmware-build:
         condition: service_completed_successfully
     command: ["renode", "--disable-xwt", "-P", "9005", "/workspace/scripts/stm32f4.resc"]
 
+  # Simulates the TMP108 temperature sensor the firmware reads over I2C1
   temp-sim:
     build:
       context: ../temp-sim
       dockerfile: Dockerfile.temp-sim
+      args:
+        BUILD_DATE: ${BUILD_DATE}
     image: temp-sim:latest
     volumes:
-      - ../temp-sim:/workspace
+      - ../temp-sim:/workspace:ro
     depends_on:
       - renode
 
+  # Simulates the SARA-R412M modem: answers AT commands over UART1, and
+  # actually connects to AWS IoT Core over real MQTT. HEALTHCHECK only
+  # passes once the session is up - run.ps1's "up --wait" catches stale certs.
   modem-sim:
     build:
       context: ../modem-sim
       dockerfile: Dockerfile.modem-sim
+      args:
+        BUILD_DATE: ${BUILD_DATE}
     image: modem-sim:latest
     volumes:
-      - ../modem-sim:/workspace
+      - ../modem-sim:/workspace:ro
     depends_on:
       - renode

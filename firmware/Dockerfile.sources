@@ -1,31 +1,57 @@
-FROM ubuntu:22.04
+# Pinned by digest (not just the "22.04" tag) for byte-identical rebuilds
+FROM ubuntu:22.04@sha256:829f6df217bcbae2b371026e81711d1a787c61b2967ad09d015063663ebafbf7
 
-# Toolchain + build tools. doxygen/cppcheck are intentionally NOT installed
-# from here - Ubuntu 22.04's apt archive is stuck on doxygen 1.9.1 and
-# cppcheck 2.7, both years behind upstream; see below instead.
+# Toolchain + build tools - doxygen/cppcheck come from below instead (apt's
+# versions here are years out of date). Versions pinned to the exact
+# candidates resolved on this base image - bump deliberately, don't drift.
 RUN apt-get update && apt-get install -y \
-    build-essential cmake ninja-build git curl ca-certificates \
-    gcc-arm-none-eabi gdb-multiarch \
-    graphviz \
+    build-essential=12.9ubuntu3 \
+    cmake=3.22.1-1ubuntu1.22.04.2 \
+    ninja-build=1.10.1-1 \
+    git=1:2.34.1-1ubuntu1.17 \
+    curl=7.81.0-1ubuntu1.27 \
+    ca-certificates=20260601~22.04.1 \
+    gcc-arm-none-eabi=15:10.3-2021.07-4 \
+    gdb-multiarch=12.1-0ubuntu1~22.04.2 \
+    graphviz=2.42.2-6ubuntu0.1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Doxygen 1.18.0 (latest stable release as of this writing) - official
-# prebuilt Linux binary, verified to run as-is on Ubuntu 22.04.
-RUN curl -fsSL https://github.com/doxygen/doxygen/releases/download/Release_1_18_0/doxygen-1.18.0.linux.bin.tar.gz \
-    | tar xz -C /opt \
+# prebuilt Linux binary, verified to run as-is on Ubuntu 22.04. SHA256 below
+# confirmed against GitHub's own release-asset digest before pinning it here.
+RUN curl -fsSL -o /tmp/doxygen.tar.gz \
+    https://github.com/doxygen/doxygen/releases/download/Release_1_18_0/doxygen-1.18.0.linux.bin.tar.gz \
+    && echo "14fa81bdc34171edb5f1f02b1d60e74802f0439b77fa44e592565d517d72df90  /tmp/doxygen.tar.gz" > /tmp/doxygen.sha256 \
+    && sha256sum -c /tmp/doxygen.sha256 \
+    && rm /tmp/doxygen.sha256 \
+    && tar xz -C /opt -f /tmp/doxygen.tar.gz \
+    && rm /tmp/doxygen.tar.gz \
     && ln -s /opt/doxygen-1.18.0/bin/doxygen /usr/local/bin/doxygen
 
 # cppcheck 2.21.0 (latest stable release as of this writing) - no prebuilt
 # Linux binary is published upstream, so built from source instead; only
 # needs the build-essential/cmake already installed above.
-RUN git clone --depth 1 --branch 2.21.0 https://github.com/danmar/cppcheck.git /tmp/cppcheck \
+RUN git clone --depth 1 --branch 2.21.0 https://github.com/cppcheck-opensource/cppcheck.git /tmp/cppcheck \
     && cmake -S /tmp/cppcheck -B /tmp/cppcheck/build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /tmp/cppcheck/build -j"$(nproc)" \
     && cmake --install /tmp/cppcheck/build \
     && rm -rf /tmp/cppcheck
 
+# Dedicated non-root user, no login shell/password needed
 RUN useradd -m firmware
+
+# Drop root for everything from here on
 USER firmware
 WORKDIR /workspace
 
+# Standard OCI annotation keys (docker inspect/registries read these).
+# BUILD_DATE comes from docker-compose.yml's build.args, set by run.ps1.
+# Placed at the end so it doesn't invalidate the cache for the layers above.
+ARG BUILD_DATE="unknown"
+LABEL org.opencontainers.image.authors="schoenenberger <rafael@schoenenberger.dev>" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.description="Firmware build/lint/docs/unit-test image - ARM toolchain, doxygen, cppcheck. Used by firmware-build/docs/lint/unit-test in compose/docker-compose.yml."
+
+# Fallback for standalone use - every service in compose/docker-compose.yml
+# overrides this via its own command:
 CMD ["bash"]

@@ -1,15 +1,30 @@
-FROM python:3.12-slim
+# Pinned by digest (not just the "3.12-slim" tag) for byte-identical rebuilds
+FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
 
+# paho-mqtt already pinned to an exact version; pip verifies its PyPI hash
+# automatically, so no separate checksum step is needed here.
 RUN pip install --no-cache-dir paho-mqtt==2.1.0
 
+# Dedicated non-root user, no login shell/password needed
 RUN useradd -m modem-sim
 
+# Drop root for everything from here on
 USER modem-sim
+# All relative paths below (sim_sara_r412m.py) resolve against this
 WORKDIR /workspace
 
 # healthy = a real MQTT session is up (see _set_healthy) - lets --wait
 # catch a stale device cert instead of a false "running".
 HEALTHCHECK --interval=2s --timeout=2s --start-period=60s --retries=3 \
-    CMD test -f /tmp/mqtt_healthy || exit 1
+    CMD ["sh", "-c", "test -f /tmp/mqtt_healthy || exit 1"]
 
+# Standard OCI annotation keys (docker inspect/registries read these).
+# BUILD_DATE comes from docker-compose.yml's build.args, set by run.ps1.
+# Placed at the end so it doesn't invalidate the cache for the layers above.
+ARG BUILD_DATE="unknown"
+LABEL org.opencontainers.image.authors="schoenenberger <rafael@schoenenberger.dev>" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.description="SARA-R412M modem simulator image. Used by the modem-sim service in compose/docker-compose.yml."
+
+# Runs as the container's main process (PID 1) - no supervisor/entrypoint wrapper
 CMD ["python3", "sim_sara_r412m.py"]
