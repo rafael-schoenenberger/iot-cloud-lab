@@ -1,24 +1,27 @@
 # ====================================================================================================
-# Infrastructure input variables
+# iot_thing variables
 # ====================================================================================================
 
-# AWS region for the IoT Core resources
+# AWS region the IoT policy's resource ARNs are scoped to
 variable "aws_region" {
-  description = "AWS region for the IoT Core resources."
+  description = "AWS region the IoT policy's resource ARNs are scoped to."
   type        = string
-  default     = "eu-central-1"
 }
 
 # Name of the IoT Thing representing the simulated tracker
 variable "thing_name" {
   description = "Name of the IoT Thing representing the simulated tracker."
   type        = string
-  default     = "iot-cloud-lab-tracker"
 }
 
 # MQTT topic the tracker is allowed to publish telemetry to
 variable "mqtt_topic" {
   description = "MQTT topic the tracker is allowed to publish telemetry to."
   type        = string
-  default     = "trackers/sim1/telemetry"
+}
+
+# Directory the device cert, private key and Amazon root CA are written to
+variable "certs_dir" {
+  description = "Directory the device cert, private key and Amazon root CA are written to."
+  type        = string
 }

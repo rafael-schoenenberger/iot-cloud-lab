@@ -4,6 +4,14 @@ mach create "stm32f4"
 
 machine LoadPlatformDescription @boards/stm32f4.repl
 
+# Suppresses harmless [WARNING] noise from dma1/dma2/uart1/uart3 - bits HAL
+# writes that Renode never models, or a benign DMA re-arm. Verified 2026-09-12
+# against Renode's own STM32DMA.cs/STM32_UART.cs source.
+logLevel 3 dma1
+logLevel 3 dma2
+logLevel 3 uart1
+logLevel 3 uart3
+
 # TMP108: outside temperature sensor - startup value, driven further by
 # temp-sim (see temp-sim/sim_tmp108.py) once the machine is running
 i2c1.tmp108 Temperature 21
