@@ -4,7 +4,9 @@
 
 # Every service below is invoked from run.ps1 - either implicitly via
 # "up" (firmware-build, renode, temp-sim, modem-sim) or explicitly via
-# "--profile <name> run" (docs, lint, unit-test).
+# "--profile <name> run" (docs, lint, unit-test). The 3 profile names are
+# also referenced by teardown.ps1's stray-container sweep - keep them in
+# sync if renamed here.
 services:
   # One-shot: compiles firmware.elf via CMake/Ninja, then exits. renode
   # below waits for this to finish successfully before it starts
@@ -41,8 +43,8 @@ services:
     command: doxygen Doxyfile
 
   # One-shot: runs cppcheck over firmware/src. Gated behind the "lint"
-  # profile - informational only, its exit code is never checked (see
-  # run.ps1's Invoke-QualityChecks)
+  # profile - a failure here only warns, never aborts run.ps1 (see
+  # run.ps1's Invoke-QualityCheck)
   lint:
     profiles: ["lint"]
     build:
