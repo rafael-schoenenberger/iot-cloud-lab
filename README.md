@@ -1,8 +1,8 @@
 # IoT Cloud Lab (iot-cloud-lab)
 
-This repository is a personal project simulating an STM32F4-based IoT asset tracker (e.g., a drone with an environmental sensor and a cellular modem) entirely in [Renode](https://renode.io/), running real STM32 HAL/FreeRTOS-based firmware - no physical hardware required. The simulated tracker publishes telemetry over a simulated cellular modem to a real AWS IoT Core + DynamoDB pipeline, provisioned via Terraform. Everything is orchestrated through Docker.  
+This repository is a personal project simulating an STM32F4-based IoT asset tracker (e.g., a drone with an environmental sensor and a cellular modem) entirely in [Renode](https://renode.io/), running real STM32 HAL/FreeRTOS-based embedded software (firmware), requiring no physical hardware. The simulated tracker publishes telemetry over a simulated cellular modem to a real AWS IoT Core + DynamoDB pipeline, provisioned via Terraform. Everything is orchestrated through Docker.  
 
-**This is a first version with one sensor value flowing through the whole chain. After deployment via the `.\run.ps1` script, you can compare the temperature value in the UART debug output (port 9002) with the value written to the DynamoDB table in your AWS account.**
+*It's a first version with one sensor value flowing through the whole chain, demonstrating that arbitrary data can be written into the AWS cloud this way. Once deployed via the `.\run.ps1` script, the firmware keeps sampling and publishing a new temperature reading every 2 seconds for as long as the stack runs, so you can compare the running UART debug output (port 9002) against the values being written to the DynamoDB table in your AWS account at any time.*
 
 ## Prerequisites
 
@@ -11,41 +11,43 @@ To work with this project effectively, ensure you have the following tools insta
 * **[PowerShell 7](https://github.com/PowerShell/PowerShell):** Runs `run.ps1`/`teardown.ps1`, the project's main entry points. The Windows-builtin PowerShell 5.1 also works (no PS7-only syntax is used), but PS7 is what this project is developed/tested with.
 * **[Docker Desktop](https://www.docker.com/products/docker-desktop/):** For building and running the Renode, firmware-build, temp-sim, and modem-sim containers.
 * **[Terraform](https://developer.hashicorp.com/terraform/install):** Provisions the AWS IoT Core / DynamoDB infrastructure.
-* **[AWS CLI](https://aws.amazon.com/cli/):** Configured with an IAM user's access key ID + secret access key (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) for the target account/region - the standard `aws configure` credential setup that Terraform's AWS provider reads.
-* **[Python](https://www.python.org/):** Runs the script that syncs the AWS IoT device certificate into the firmware after each `terraform apply`.
-* **[PuTTY](https://www.chiark.greenend.org.uk/~sgtatham/putty/):** `run.ps1` opens it automatically once the stack is up, connected to the UART3 debug output.
+* **[AWS CLI](https://aws.amazon.com/cli/):** Configured with an IAM user's access key ID + secret access key (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) for the target account/region, the standard `aws configure` credential setup that Terraform's AWS provider reads.
+* **[Python](https://www.python.org/):** Runs the script that syncs the AWS IoT device certificate, private key, and root CA into the firmware after each `terraform apply`.
+* **[PuTTY](https://www.chiark.greenend.org.uk/~sgtatham/putty/):** `run.ps1` opens it automatically once the stack is up, connected to the UART3 debug output on `127.0.0.1:9002`.
 * **[VS Code](https://code.visualstudio.com/):** Recommended editor for development.
 * **[Git](https://git-scm.com/):** With submodule support, needed to pull in the vendored STM32 HAL/CMSIS/FreeRTOS/Unity libraries.
 
-*The project currently uses the TMP108 temperature sensor (I2C1) and the SARA-R412M modem (UART1) end-to-end. The IMU (`icm20948`) and pressure/humidity sensor (`bme280`) are already defined in `renode/boards/stm32f4.repl` too, and can be wired up in the firmware in the future.*
+*The project currently uses the simulated TMP108 temperature sensor (I2C1) and the simulated SARA-R412M modem (UART1) end-to-end. The IMU (`icm20948`) and pressure/humidity sensor (`bme280`) are already defined as simulated peripherals in `renode/boards/stm32f4.repl` too, and can be wired up in the firmware in the future.*
 
 ---
 
 ## Repository Structure
 
 ```text
-├── .githooks/                        # core.hooksPath - keeps file-header dates in sync with the real commit date
+├── .githooks/                        # core.hooksPath; keeps file-header dates in sync with the real commit date
 │   └── pre-commit                    # Auto-updates Doxygen @date / PowerShell .NOTES Date on commit
 ├── .vscode/                          # VSCode settings
 ├── compose/                          # Docker Compose orchestration
 │   └── docker-compose.yml            # firmware-build, renode, temp-sim, modem-sim + opt-in docs/lint/unit-test profiles
 ├── firmware/                         # STM32 HAL + FreeRTOS tracker firmware
-│   ├── build/                        # Generated by CMake/Ninja (firmware.elf), Doxygen (docs/), cppcheck (lint.log), and the unit test run (test.log) - not committed
+│   ├── build/                        # Generated by CMake/Ninja (firmware.elf), Doxygen (docs/), cppcheck (lint.log), and the unit test run (test.log); not committed
 │   ├── build_unit_tests/             # Generated by the unit test build below (Unity), not committed
 │   ├── src/                          # main.c, peripherals/, sensor/, modem/, debug/, CMakeLists.txt, linker script, HAL config
-│   ├── unit_tests/                   # Unity tests for FreeRTOS/HAL-free logic (e.g. modem_payload.c, debug_format.c) - built with plain gcc in the same container, not cross-compiled with arm-none-eabi-gcc like firmware/src
+│   ├── unit_tests/                   # Unity tests for FreeRTOS/HAL-free logic (e.g. modem_payload.c, debug_format.c); built with plain gcc in the same container, not cross-compiled with arm-none-eabi-gcc like firmware/src
+│   │   ├── debug/                    # test_debug.c: tests debug_format.c
+│   │   ├── modem/                    # test_modem.c: tests modem_payload.c
 │   │   └── vendor/unity/             # Unity test framework (git submodule)
 │   ├── vendor/                       # HAL driver, CMSIS device/core, FreeRTOS (git submodules)
 │   ├── Dockerfile.sources            # Sources Docker image (toolchain + doxygen + cppcheck)
-│   └── Doxyfile                      # Doxygen config - HTML API docs from the doc comments in src/ and unit_tests/
-├── infra/terraform/iot/              # Root module - calls modules/iot_thing + modules/telemetry
-│   ├── generate_firmware_certs.py    # Syncs the issued device cert into firmware/src/aws_certs.h
+│   └── Doxyfile                      # Doxygen config; HTML API docs from the doc comments in src/ and unit_tests/
+├── infra/terraform/iot/              # Root module; calls modules/iot_thing + modules/telemetry
+│   ├── generate_firmware_certs.py    # Syncs the issued device cert, private key, and root CA into firmware/src/aws_certs.h
 │   ├── main.tf                       # module "iot_thing" + module "telemetry" calls
 │   ├── outputs.tf                    # iot_endpoint, thing_name, certs_dir, telemetry_table, ...
 │   ├── provider.tf                   # terraform{} + aws provider config
 │   └── variables.tf                  # aws_region, thing_name, mqtt_topic
 ├── infra/terraform/modules/          # Reusable Terraform modules called by infra/terraform/iot's root module
-│   ├── iot_thing/                    # IoT Thing, device certificate, policy - AWS IoT Core provisioning
+│   ├── iot_thing/                    # IoT Thing, device certificate, private key, policy; AWS IoT Core provisioning
 │   │   ├── main.tf                   # aws_iot_thing/_certificate/_policy, root CA fetch, cert files written to certs_dir
 │   │   ├── outputs.tf                # thing_name, certificate_id, iot_endpoint
 │   │   └── variables.tf              # aws_region, thing_name, mqtt_topic, certs_dir
@@ -57,8 +59,8 @@ To work with this project effectively, ensure you have the following tools insta
 │   ├── Dockerfile.modem-sim          # modem-sim Docker image
 │   └── sim_sara_r412m.py             # AT command interface + the real MQTT/TLS client
 ├── renode/                           # STM32F4 board definition and Renode Docker image
-│   ├── boards/                       # stm32f4.repl - peripheral/memory map
-│   ├── scripts/                      # stm32f4.resc - boot script, loads firmware.elf
+│   ├── boards/                       # stm32f4.repl: peripheral/memory map
+│   ├── scripts/                      # stm32f4.resc: boot script, loads firmware.elf
 │   └── Dockerfile.renode             # Renode Docker image
 ├── temp-sim/                         # Simulates a TMP108 temperature sensor over I2C
 │   ├── Dockerfile.temp-sim           # temp-sim Docker image
@@ -74,39 +76,42 @@ To work with this project effectively, ensure you have the following tools insta
 
 ## Renode Simulation
 
-The `renode/` directory defines an STM32F407 (Cortex-M4) machine: flash, SRAM, NVIC, RCC, PWR, three UARTs (only UART1/UART3 are wired up; UART2 is reserved for a not-yet-simulated GNSS receiver), two DMA controllers (only the UART TX streams are wired up - USART3 on DMA1 stream3, USART1 on DMA2 stream7), an I2C bus with a simulated TMP108 sensor, and GPIO ports - all matched against the real STM32F4 register map. The boot script (`stm32f4.resc`) loads the built `firmware.elf` directly via `sysbus LoadELF`, starts a GDB server on port 3333 for optional interactive debugging, and relays UART1 (to the modem) and UART3 (debug output, `127.0.0.1:9002`) over TCP.
+The `renode/` directory defines an STM32F407 (Cortex-M4) machine: flash, SRAM, NVIC, RCC, PWR, three UARTs (only UART1/UART3 are wired up; UART2 is reserved for a not-yet-simulated GNSS receiver), two DMA controllers (only the UART TX streams are wired up: USART3 on DMA1 stream3, USART1 on DMA2 stream7), an I2C bus with a simulated TMP108 sensor, and GPIO ports, all matched against the real STM32F4 register map. The boot script (`stm32f4.resc`) loads the built `firmware.elf` directly via `sysbus LoadELF`, starts a GDB server on port 3333 for optional interactive debugging, and relays UART1 (to the modem) and UART3 (debug output, `127.0.0.1:9002`) over TCP.
 
 ## Firmware
 
-The `firmware/` directory builds real STM32 HAL + FreeRTOS-based firmware - cross-compiled in the container via CMake/Ninja - against the official ST HAL driver and CMSIS device headers, pulled in as git submodules. `src/` is split into `peripherals/` (system clock, UART, I2C), `sensor/` (`TempTask`, reads the simulated TMP108 over I2C), `modem/` (`ModemTask`, drives the simulated modem's AT command interface to publish each reading to AWS IoT Core over MQTT), and `debug/` (`DebugTask`, drains a queue fed by the `DBG(...)` macro and prints timestamped lines over UART3). All public functions carry Doxygen (`@brief`/`@param`/`@retval`) comments.
+The `firmware/` directory builds real STM32 HAL + FreeRTOS-based embedded software (firmware), cross-compiled in the container via CMake/Ninja against the official ST HAL driver and CMSIS device headers, pulled in as git submodules. `src/` is split into:
 
-`modem/modem_payload.c` (building the AT+UMQTTC publish command from a sensor sample) and `debug/debug_format.c` (the pure string-formatting half of `DebugTask`) are both deliberately kept free of any FreeRTOS/HAL dependency, so `firmware/unit_tests/` can compile and run them directly with plain `gcc` in the same container - no ARM cross-compilation and no Renode needed just to test this logic.
+- `peripherals/`: system clock, UART, I2C
+- `sensor/`: `TempTask`, reads the simulated TMP108 over I2C
+- `modem/`: `ModemTask`, drives the simulated modem's AT command interface to publish each reading to AWS IoT Core over MQTT
+- `debug/`: `DebugTask`, drains a queue fed by the `DBG(...)` macro and prints timestamped lines over UART3
 
-`ModemTask`'s MQTT/AT bring-up (certificate upload + connect) runs exactly once at boot - there is no reconnect logic if the connection is later lost. `run.ps1` works around this by always starting `temp-sim`/`modem-sim` before the firmware boots (see Docker Orchestration below), but a connection dropped during a live run would not currently recover on its own.
+All public functions carry Doxygen (`@brief`/`@param`/`@retval`) comments.
+
+`modem/modem_payload.c` (building the AT+UMQTTC publish command from a sensor sample) and `debug/debug_format.c` (the pure string-formatting half of `DebugTask`) are both deliberately kept free of any FreeRTOS/HAL dependency, so `firmware/unit_tests/` can compile and run them directly with plain `gcc` in the same container, with no ARM cross-compilation and no Renode needed just to test this logic.
+
+`ModemTask`'s MQTT/AT bring-up (certificate upload + connect) runs exactly once at boot. For simplicity, this relies on the reliability of the simulated modem/connection rather than implementing reconnect logic; reconnect handling will be needed for a final real-world-like simulation.
 
 ## Cloud Pipeline
 
-`infra/terraform/iot/` is the root module - it calls two reusable submodules under `infra/terraform/modules/`: `iot_thing` provisions the AWS IoT Thing, device certificate, and policy (plus fetches Amazon's root CA, checksum-verified), and `telemetry` provisions the IoT Rule that persists incoming telemetry into a DynamoDB table, along with the IAM role and CloudWatch log group the rule needs. The device cert is re-issued on every fresh `terraform apply`; `generate_firmware_certs.py` keeps the firmware's embedded copy (`firmware/src/aws_certs.h`) in sync - `run.ps1` runs it automatically.
+`infra/terraform/iot/` is the root module, calling two submodules under `infra/terraform/modules/`:  
+`iot_thing` provisions the AWS IoT Thing, device certificate and private key (AWS-generated), and policy (plus fetches Amazon's root CA, checksum-verified), and `telemetry` provisions the IoT Rule that persists incoming telemetry into a DynamoDB table, along with the IAM role and CloudWatch log group the rule needs.  
+The device cert and private key are re-issued together as a matching pair on every fresh `terraform apply`; `generate_firmware_certs.py` keeps the firmware's embedded copy (`firmware/src/aws_certs.h`) in sync; `run.ps1` runs it automatically.
 
-`modem-sim/` simulates a u-blox SARA-R412M modem's AT command interface: the firmware talks AT commands over UART1 exactly as it would to real hardware, and the simulator uses the certs it receives to open a real MQTT/TLS connection to AWS IoT Core.
+`modem-sim/` simulates a u-blox SARA-R412M modem's AT command interface: the firmware talks AT commands over UART1 exactly as it would to real hardware, and the simulator uses the root CA, cert, and private key it receives to open a real MQTT/TLS connection to AWS IoT Core.
 
-## Docker Orchestration
+## Running the Stack (PowerShell Scripts & Docker Orchestration)
 
-`run.ps1` starts `temp-sim`/`modem-sim` first (always force-recreated, so an edited `.py` source is picked up), then builds and starts `firmware-build` (a one-shot container that compiles `firmware.elf` and exits) followed by `renode` (loads that firmware) - deliberately in this order, since the firmware's one-time AT/MQTT bring-up must talk to the already-current `temp-sim`/`modem-sim` instances, not ones replaced out from under it after the fact. The `renode` container exposes four ports to the host: `3333` (GDB server), `9002` (UART3 debug output), `9005` (Renode's own monitor), and `9006` (UART1 modem link, consumed by `modem-sim`).
+Run `.\run.ps1` any time; it deploys/verifies the AWS infra, runs docs/lint/unit-test (stopping early if the unit tests fail), brings up temp-sim/modem-sim first and firmware-build/renode second (see below), waits for a confirmed MQTT connection (fails loudly if the device cert is out of sync), and opens PuTTY on the UART3 debug output (`127.0.0.1:9002`) automatically.
 
-Three further one-shot services handle code quality, gated behind [Compose profiles](https://docs.docker.com/compose/how-tos/profiles/) - they have no dependency on `firmware-build` or each other within the Compose file itself:
+Three further one-shot services handle code quality, gated behind [Compose profiles](https://docs.docker.com/compose/how-tos/profiles/) (`docs`, `lint`, `unit-test`) and run automatically by `run.ps1` via `docker compose`: `docs` generates the Doxygen HTML to `firmware/build/docs/html/index.html`, `lint` runs cppcheck over `firmware/src` into `firmware/build/lint.log`, and `unit-test` runs the Unity tests into `firmware/build/test.log`. They have no dependency on `firmware-build` or each other within the Compose file itself, and all three reuse the same `firmware:latest` image as `firmware-build`, so nothing further needs installing locally beyond the [Prerequisites](#prerequisites) above.
 
-```powershell
-docker compose -f compose/docker-compose.yml --profile docs run --build --rm docs           # Doxygen HTML -> firmware/build/docs/html/index.html
-docker compose -f compose/docker-compose.yml --profile lint run --build --rm lint           # cppcheck over firmware/src -> firmware/build/lint.log
-docker compose -f compose/docker-compose.yml --profile unit-test run --build --rm unit-test # Unity tests in firmware/unit_tests/ -> firmware/build/test.log
-```
+After that, `run.ps1` brings up the simulation stack itself: `temp-sim`/`modem-sim` first (always force-recreated, so an edited `.py` source is picked up), then `firmware-build` (a one-shot container that compiles `firmware.elf` and exits) followed by `renode` (loads that firmware), deliberately in this order, since the firmware's one-time AT/MQTT bring-up must talk to the already-current `temp-sim`/`modem-sim` instances, not ones replaced out from under it after the fact. The `renode` container exposes four ports to the host: `3333` (GDB server), `9002` (UART3 debug output), `9005` (Renode's own monitor), and `9006` (UART1 modem link, consumed by `modem-sim`). Once the stack is healthy and PuTTY has opened, `run.ps1` follows every service's logs on the PowerShell console, which keeps running until stopped with Ctrl+C.
 
-All three reuse the same `firmware:latest` image as `firmware-build`, so nothing further needs installing locally beyond the [Prerequisites](#prerequisites) above.
+<br>
 
-Run `.\run.ps1` any time - it deploys/verifies the AWS infra, runs docs/lint/unit-test (stopping early if the unit tests fail), brings up temp-sim/modem-sim first and firmware-build/renode second (see above), waits for a confirmed MQTT connection (fails loudly if the device cert is out of sync), and opens PuTTY on the UART3 debug output (`127.0.0.1:9002`) automatically. Run `.\teardown.ps1` to stop the stack and tear the AWS infra back down (no confirmation prompt - destroys the AWS resources immediately).
-
-One-time setup after cloning: `git config core.hooksPath .githooks` - not set automatically by `git clone`, but activates the pre-commit hook that keeps Doxygen `@date`/PowerShell `.NOTES` `Date:` headers in sync with the real commit date.
+Run `.\teardown.ps1` to stop the stack and tear the AWS infra back down (no confirmation prompt, destroys the AWS resources immediately).
 
 <br>
 <br>
@@ -124,6 +129,6 @@ If you have any questions regarding the setup, architecture, configuration, or s
 ---
 
 #### License
-All rights reserved - see the [LICENSE](LICENSE) file for details.
+All rights reserved. See the [LICENSE](LICENSE) file for details.
 
 ---
