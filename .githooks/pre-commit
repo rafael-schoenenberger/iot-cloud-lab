@@ -1,0 +1,37 @@
+#!/bin/sh
+# Syncs file-header dates (Doxygen @date, PowerShell .NOTES Date:) to the
+# real commit date. Only touches files staged in this commit.
+
+today=$(date -u +%Y-%m-%d)
+
+# Doxygen @date - firmware/src/**/*.{c,h} and firmware/unit_tests/**/*.{c,h},
+# excluding any vendor/ subtree (third-party code, untouched by us, has its
+# own dates).
+git diff --cached --name-only --diff-filter=ACM -- 'firmware/src/*.c' 'firmware/src/*.h' 'firmware/unit_tests/*.c' 'firmware/unit_tests/*.h' |
+while IFS= read -r file; do
+    case "$file" in
+        */vendor/*) continue ;;
+    esac
+    [ -f "$file" ] || continue
+
+    if grep -qE '^  \* @date    [0-9]{4}-[0-9]{2}-[0-9]{2}$' "$file"; then
+        # -i.bak + explicit rm: portable across GNU sed (Linux/Git Bash) and
+        # BSD sed (macOS), which requires -i's backup suffix as its own arg.
+        sed -i.bak -E "s/^(  \* @date    )[0-9]{4}-[0-9]{2}-[0-9]{2}$/\1${today}/" "$file"
+        rm -f "$file.bak"
+        git add "$file"
+    fi
+done
+
+# PowerShell .NOTES "Date:" - every *.ps1 in the repo (no vendored PowerShell
+# code exists here).
+git diff --cached --name-only --diff-filter=ACM -- '*.ps1' |
+while IFS= read -r file; do
+    [ -f "$file" ] || continue
+
+    if grep -qE '^    Date:   [0-9]{4}-[0-9]{2}-[0-9]{2}$' "$file"; then
+        sed -i.bak -E "s/^(    Date:   )[0-9]{4}-[0-9]{2}-[0-9]{2}$/\1${today}/" "$file"
+        rm -f "$file.bak"
+        git add "$file"
+    fi
+done

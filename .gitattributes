@@ -1,0 +1,3 @@
+# Forces LF so the pre-commit hook's shebang keeps working regardless of
+# the local core.autocrlf setting.
+.githooks/* text eol=lf

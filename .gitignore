@@ -9,7 +9,7 @@ __pycache__/
 # generated from Terraform outputs by infra/terraform/iot/certs/ -> firmware header script
 firmware/src/aws_certs.h
 
-# Terraform state (kept local, not in a remote backend - see infra/terraform/iot/main.tf)
+# Terraform state (kept local, not in a remote backend - see infra/terraform/iot/provider.tf)
 # and local provider cache
 infra/terraform/**/.terraform/
 infra/terraform/**/.terraform.lock.hcl
