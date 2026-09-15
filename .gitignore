@@ -7,7 +7,7 @@ __pycache__/
 *.pyc
 
 # generated from Terraform outputs by infra/terraform/iot/certs/ -> firmware header script
-firmware/src/aws_certs.h
+firmware/src/aws_certs_key_params.h
 
 # Terraform state (kept local, not in a remote backend - see infra/terraform/iot/provider.tf)
 # and local provider cache

@@ -2,14 +2,14 @@
   ******************************************************************************
   * @file    modem_payload.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-08-25
+  * @date    2026-09-15
   * @brief   Pure (no FreeRTOS/HAL dependency) helpers for building the
   *          AT+UMQTTC publish command from a SensorSample_t
   ******************************************************************************
   */
 
 #include "modem_payload.h"
-#include "aws_certs.h"
+#include "aws_certs_key_params.h"
 #include <stdint.h>
 #include <stdio.h>
 

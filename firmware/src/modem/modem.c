@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    modem.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-08-24
+  * @date    2026-09-15
   * @brief   AT command helpers for the SARA-R412M modem (send/wait, blocking
   *          line reads, cert upload) and ModemTask (network/TLS/MQTT bring-up
   *          + publish loop - payload building in modem_payload.c/.h)
@@ -13,7 +13,7 @@
 #include "uart.h"
 #include "sensor.h"
 #include "modem_payload.h"
-#include "aws_certs.h"
+#include "aws_certs_key_params.h"
 #include "debug.h"
 #include "FreeRTOS.h"
 #include "task.h"

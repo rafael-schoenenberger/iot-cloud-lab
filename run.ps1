@@ -4,13 +4,13 @@
     starts the simulation stack.
 .DESCRIPTION
     Runs terraform init/plan/apply against infra/terraform/iot, regenerates
-    firmware/src/aws_certs.h, runs docs/lint/unit-test (Doxygen, cppcheck,
+    firmware/src/aws_certs_key_params.h, runs docs/lint/unit-test (Doxygen, cppcheck,
     Unity), then builds/force-recreates temp-sim/modem-sim first (picks up
     an edited .py source before firmware boots), then firmware-build/renode.
     Opens PuTTY on the UART3 debug output once healthy; safe to rerun anytime.
 .NOTES
     Author: schoenenberger <rafael@schoenenberger.dev>
-    Date:   2026-09-12
+    Date:   2026-09-15
 #>
 
 # Terraform module directory - Deploy-Infra cd's into it via Push-Location
@@ -23,7 +23,7 @@ $compose = "$PSScriptRoot/compose/docker-compose.yml"
 # image's org.opencontainers.image.created label, never a stale hardcoded date
 $env:BUILD_DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
-# Applies the Terraform module, then regenerates aws_certs.h from its output
+# Applies the Terraform module, then regenerates aws_certs_key_params.h from its output
 # so the firmware embeds the freshly (re-)issued device cert
 function Deploy-Infra {
     Push-Location $terraformDir
@@ -63,11 +63,11 @@ function Deploy-Infra {
         Pop-Location
     }
 
-    # Keeps aws_certs.h in sync with the deployed cert; harmless to rerun
+    # Keeps aws_certs_key_params.h in sync with the deployed cert; harmless to rerun
     # even when nothing changed (only the @date stamp updates).
-    python "$terraformDir/generate_firmware_certs.py"
+    python "$terraformDir/generate_fw_certs_key_and_params.py"
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "generate_firmware_certs.py failed" -ForegroundColor Red
+        Write-Host "generate_fw_certs_key_and_params.py failed" -ForegroundColor Red
         exit 1
     }
 }
