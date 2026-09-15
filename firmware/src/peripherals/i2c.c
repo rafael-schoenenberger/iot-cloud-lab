@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    i2c.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-08-24
+  * @date    2026-09-15
   * @brief   I2C1 initialization for the TMP108 temperature sensor
   ******************************************************************************
   */
@@ -31,11 +31,12 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef *hi2c)
     __HAL_RCC_I2C1_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    /* PB6 = I2C1_SCL, PB7 = I2C1_SDA (AF4), open-drain as required on an I2C bus */
+    /* PB6 = I2C1_SCL, PB7 = I2C1_SDA (AF4), open-drain as required on an I2C
+     * bus; no internal pull, real hardware needs external resistors on both */
     GPIO_InitTypeDef gpio = {0};
     gpio.Pin = GPIO_PIN_6 | GPIO_PIN_7;
     gpio.Mode = GPIO_MODE_AF_OD;
-    gpio.Pull = GPIO_PULLUP;
+    gpio.Pull = GPIO_NOPULL;
     gpio.Speed = GPIO_SPEED_FREQ_HIGH;
     gpio.Alternate = GPIO_AF4_I2C1;
 

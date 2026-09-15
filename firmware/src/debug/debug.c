@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    debug.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-04
+  * @date    2026-09-15
   * @brief   Dedicated debug-output task: DebugTask alone owns UART3 debug
   *          output, draining qDebugLog and printing each message via DMA -
   *          see debug_log()
@@ -27,6 +27,9 @@
  * text plus room for the "[4294967295] " uptime_ms prefix (uint32_t max) */
 #define DEBUG_LINE_LEN (DEBUG_MSG_LEN + 16)
 
+/**
+  * @brief  Queue of DebugMsg_t values: filled by DBG(), drained by DebugTask
+  */
 QueueHandle_t qDebugLog;
 
 /**

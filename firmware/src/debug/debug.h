@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    debug.h
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-04
+  * @date    2026-09-15
   * @brief   Dedicated debug-output task: DebugTask alone drains qDebugLog and
   *          prints each message on UART3, so other tasks log via the DBG()
   *          macro instead of calling uart3_transmit_dma() themselves
@@ -31,9 +31,6 @@ typedef struct
     uint32_t uptime_ms; /**< HAL_GetTick() at the moment DBG() was called */
 } DebugMsg_t;
 
-/**
-  * @brief  Queue of DebugMsg_t values: filled by DBG(), drained by DebugTask
-  */
 extern QueueHandle_t qDebugLog;
 
 void debug_log(const char *fmt, ...);

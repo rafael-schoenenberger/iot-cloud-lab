@@ -2,11 +2,9 @@
   ******************************************************************************
   * @file    sensor_types.h
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-08-25
-  * @brief   SensorSample_t, split out of sensor.h so it can be included
-  *          without pulling in FreeRTOS/queue.h - lets firmware/unit_tests/
-  *          compile and use the type natively (plain gcc, no ARM cross-
-  *          compilation needed)
+  * @date    2026-09-15
+  * @brief   SensorSample_t, split out of sensor.h so unit tests can use it
+  *          with plain gcc, without pulling in FreeRTOS/queue.h
   ******************************************************************************
   */
 

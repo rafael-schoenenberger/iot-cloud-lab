@@ -107,9 +107,9 @@ services:
       - ../renode/boards:/workspace/boards:ro
       - ../renode/scripts:/workspace/scripts:ro
       - ../firmware/build:/workspace/build:ro
-    # Bound to 127.0.0.1 only - 3333/9005 are effectively remote-control
-    # interfaces (GDB, Renode's monitor) and shouldn't be reachable from
-    # elsewhere on the network.
+    # Bound to 127.0.0.1 only; 3333/9005 are effectively remote-control
+    # interfaces (GDB, Renode's monitor), shouldn't be reachable elsewhere
+    # on the network. All 4 map to this container's own internal IP.
     ports:
       - "127.0.0.1:3333:3333"
       - "127.0.0.1:9002:9002"

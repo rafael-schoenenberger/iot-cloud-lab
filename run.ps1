@@ -130,11 +130,16 @@ function Start-Stack {
         exit 1
     }
 
-    Write-Host "Stack healthy - telemetry should be flowing into DynamoDB." -ForegroundColor Green
+    Write-Host "Stack healthy; telemetry should be flowing into DynamoDB." -ForegroundColor Green
+
+    # Prints each container's internal Docker-network IP (containers actually
+    # talk via DNS by name); 127.0.0.1 on the published ports always maps to renode, the only service with a ports: section.
+    Write-Host "Container IPs (compose_default network):" -ForegroundColor Cyan
+    docker network inspect compose_default --format '{{range .Containers}}{{.Name}}: {{.IPv4Address}}{{"\n"}}{{end}}'
 }
 
 # Opens PuTTY on the UART3 debug console, unless something is already
-# connected to it - checked via the TCP connection itself (127.0.0.1:9002,
+# connected to it; checked via the TCP connection itself (127.0.0.1:9002,
 # Established), not just "is any putty.exe running".
 function Start-DebugConsole {
     $alreadyConnected = Get-NetTCPConnection -RemoteAddress 127.0.0.1 -RemotePort 9002 -State Established -ErrorAction SilentlyContinue
