@@ -55,6 +55,9 @@ To work with this project effectively, ensure you have the following tools insta
 │       ├── main.tf                   # aws_dynamodb_table, IAM role/policies, CloudWatch log group, aws_iot_topic_rule
 │       ├── outputs.tf                # telemetry_table
 │       └── variables.tf              # thing_name, mqtt_topic, certificate_id
+├── manuals-and-datasheets/           # Official manuals/datasheets for the simulated hardware, not referenced by code
+│   ├── sara-r412m/                   # u-blox SARA-R412M: data sheet, AT commands manual, system integration manual, product summary
+│   └── tmp108/                       # TI TMP108: datasheet, output-format app note, EVM user's guide
 ├── modem-sim/                        # Simulates a u-blox SARA-R412M modem, drives a real MQTT/TLS connection to AWS IoT Core
 │   ├── Dockerfile.modem-sim          # modem-sim Docker image
 │   └── sim_sara_r412m.py             # AT command interface + the real MQTT/TLS client
