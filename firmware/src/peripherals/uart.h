@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    uart.h
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-08-24
+  * @date    2026-09-16
   * @brief   USART3 (debug console) and USART1 (SARA-R412M modem link)
   *          handles, initialization and blocking helpers for reading AT
   *          command responses out of the UART1 RX stream buffer
@@ -26,5 +26,6 @@ bool uart1_wait_char(char expected, uint32_t timeout_ms);
 bool uart1_read_line(char *line, size_t line_size, uint32_t timeout_ms);
 bool uart1_transmit_dma(const uint8_t *data, uint16_t len, uint32_t timeout_ms);
 bool uart3_transmit_dma(const uint8_t *data, uint16_t len, uint32_t timeout_ms);
+void uart3_panic_write(const char *msg);
 
 #endif /* UART_H */

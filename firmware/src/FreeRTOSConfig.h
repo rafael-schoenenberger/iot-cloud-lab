@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    FreeRTOSConfig.h
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-08-24
+  * @date    2026-09-16
   * @brief   Project-specific FreeRTOS kernel configuration: tick rate, task
   *          priorities/stack/heap sizing, NVIC priority grouping for the
   *          Cortex-M4/ARM_CM3 port, and the configASSERT() failure trap
@@ -60,7 +60,24 @@ extern uint32_t SystemCoreClock;
 #define configMAX_SYSCALL_INTERRUPT_PRIORITY \
     (configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))
 
-#define configASSERT(x) do { if ((x) == 0) { taskDISABLE_INTERRUPTS(); for( ;; ); } } while (0)
+/* Forward-declared instead of #include "uart.h", to avoid pulling
+ * stm32f4xx_hal.h into every FreeRTOS.h consumer; see uart3_panic_write()
+ * in uart.c */
+void uart3_panic_write(const char *msg);
+
+/* Stringizes __LINE__ into a literal so configASSERT can concatenate it at
+ * compile time, no runtime formatting needed */
+#define configASSERT_STRINGIZE_(x) #x
+#define configASSERT_STRINGIZE(x)  configASSERT_STRINGIZE_(x)
+
+#define configASSERT(x) \
+    do { \
+        if ((x) == 0) { \
+            uart3_panic_write("ASSERT FAILED: " __FILE__ ":" configASSERT_STRINGIZE(__LINE__) "\r\n"); \
+            taskDISABLE_INTERRUPTS(); \
+            for( ;; ); \
+        } \
+    } while (0)
 
 /* Satisfies the weak SVC_Handler/PendSV_Handler symbols in
  * startup_stm32f407xx.s. SysTick_Handler is intentionally not remapped -

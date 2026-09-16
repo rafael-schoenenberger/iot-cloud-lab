@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    main.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-08-24
+  * @date    2026-09-16
   * @brief   Application entry point: HAL/FreeRTOS bring-up, peripheral
   *          initialization and task creation for the temperature-to-AWS-IoT
   *          telemetry pipeline (TempTask -> qSensorData -> ModemTask)
@@ -47,6 +47,9 @@ int main(void)
     qDebugLog = xQueueCreate(DEBUG_QUEUE_LEN, sizeof(DebugMsg_t));
     configASSERT(qDebugLog != NULL);
 
+    /* FreeRTOS task priority: higher number = more important, range 0
+     * (tskIDLE_PRIORITY) to configMAX_PRIORITIES-1 (4 here); opposite of
+     * NVIC interrupt priority, see UART_IRQ_PRIORITY in uart.c */
     configASSERT(xTaskCreate(TempTask, "TempTask", TEMP_TASK_STACK_SIZE, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
     configASSERT(xTaskCreate(ModemTask, "ModemTask", MODEM_TASK_STACK_SIZE, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);
     configASSERT(xTaskCreate(DebugTask, "DebugTask", DEBUG_TASK_STACK_SIZE, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS);

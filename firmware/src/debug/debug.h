@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    debug.h
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-15
+  * @date    2026-09-16
   * @brief   Dedicated debug-output task: DebugTask alone drains qDebugLog and
   *          prints each message on UART3, so other tasks log via the DBG()
   *          macro instead of calling uart3_transmit_dma() themselves
@@ -34,14 +34,17 @@ typedef struct
 extern QueueHandle_t qDebugLog;
 
 void debug_log(const char *fmt, ...);
+void debug_log_from_isr(BaseType_t *pxHigherPriorityTaskWoken, const char *fmt, ...);
 void DebugTask(void *argument);
 
 /* Call sites use this instead of debug_log() directly. The trailing ';'
  * is baked in on purpose, so call sites write DBG(...) with no semicolon */
 #if DEBUG
 #define DBG(...) debug_log(__VA_ARGS__);
+#define DBG_FROM_ISR(...) debug_log_from_isr(__VA_ARGS__);
 #else
 #define DBG(...) do {} while(0);
+#define DBG_FROM_ISR(...) do {} while(0);
 #endif
 
 #endif /* DEBUG_H */

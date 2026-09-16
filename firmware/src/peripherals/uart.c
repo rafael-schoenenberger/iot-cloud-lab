@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    uart.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-08-24
+  * @date    2026-09-16
   * @brief   USART3 (debug console) and USART1 (SARA-R412M modem link)
   *          initialization, DMA-driven TX for both, ISR-driven single-byte
   *          RX for USART1, and blocking helpers for reading AT command
@@ -13,37 +13,48 @@
 #include "uart.h"
 #include "FreeRTOS.h"
 #include "task.h"
-#include "semphr.h"
 #include "stream_buffer.h"
+#include "debug.h"
 
 #define USART3_BAUD_RATE 921600
 #define USART1_BAUD_RATE 115200
 
 #define UART1_RX_BUF_LEN 128
 
-/* >= configMAX_SYSCALL_INTERRUPT_PRIORITY - shared by every UART/DMA IRQ
- * enabled in HAL_UART_MspInit() below */
+/* Hard cap for uart3_panic_write(), in case msg is ever not NUL-terminated */
+#define UART3_PANIC_WRITE_MAX_LEN 64
+
+/* Must be >= configMAX_SYSCALL_INTERRUPT_PRIORITY; shared by every UART/DMA
+ * IRQ in HAL_UART_MspInit(). NVIC priority: lower number = more urgent
+ * (range 0-15); opposite of FreeRTOS task priority, see main.c */
 #define UART_IRQ_PRIORITY 6
 
+/**
+  * @brief  HAL handles for USART3 (debug console) and USART1 (modem link)
+  */
 UART_HandleTypeDef huart3;
 UART_HandleTypeDef huart1;
 
 /* UART1 RX: interrupt-driven, one byte at a time, fed into a StreamBuffer
  * so ModemTask can block (xStreamBufferReceive) instead of polling for AT
- * responses - see HAL_UART_RxCpltCallback/USART1_IRQHandler below */
+ * responses; see HAL_UART_RxCpltCallback/USART1_IRQHandler below */
 static StreamBufferHandle_t xUart1Rx;
 static uint8_t uart1_rx_byte;
 
-/* UART1/UART3 TX: DMA-driven, serialized so a caller blocks until any
- * previous transfer has completed. UART1 uses a task notification (single
- * caller); UART3 uses a semaphore (called from TempTask and ModemTask) */
+/**
+  * @brief  UART1/UART3 TX DMA handles and task notifications: both are
+  *         single-caller (UART1: ModemTask; UART3: DebugTask), each
+  *         serialized via its own task notification
+  */
 static DMA_HandleTypeDef hdma_usart1_tx;
 static DMA_HandleTypeDef hdma_usart3_tx;
 static TaskHandle_t xUart1TxTask;
-static SemaphoreHandle_t xUart3TxSem;
+static TaskHandle_t xUart3TxTask;
 
 /**
-  * @brief  USART1 global interrupt handler, forwarded to the HAL
+  * @brief  USART1 global interrupt handler, forwarded to the HAL; serves
+  *         both RX (HAL_UART_RxCpltCallback) and the DMA-TX completion
+  *         handshake (UART_DMATransmitCplt())
   * @retval None
   */
 void USART1_IRQHandler(void)
@@ -52,7 +63,7 @@ void USART1_IRQHandler(void)
 }
 
 /**
-  * @brief  USART3 global interrupt handler, forwarded to the HAL - required
+  * @brief  USART3 global interrupt handler, forwarded to the HAL; required
   *         for HAL's DMA-TX completion handshake (UART_DMATransmitCplt())
   * @retval None
   */
@@ -83,7 +94,8 @@ void DMA1_Stream3_IRQHandler(void)
 
 /**
   * @brief  HAL UART RX-complete callback: pushes the received USART1 byte
-  *         into the RX stream buffer and re-arms reception for the next one
+  *         into the RX stream buffer (logging a drop if it's full) and
+  *         re-arms reception for the next one
   * @param  huart UART handle that completed reception
   * @retval None
   */
@@ -96,15 +108,20 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-    xStreamBufferSendFromISR(xUart1Rx, &uart1_rx_byte, 1, &xHigherPriorityTaskWoken);
-    HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1);
+    if(xStreamBufferSendFromISR(xUart1Rx, &uart1_rx_byte, 1, &xHigherPriorityTaskWoken) == 0)
+    {
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "USART1 RX byte dropped, xUart1Rx full\r\n")
+    }
+
+    configASSERT(HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1) == HAL_OK);
 
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 /**
   * @brief  HAL UART TX-complete callback: frees up USART1/USART3 for the next
-  *         uart{1,3}_transmit_dma() call (see xUart1TxTask/xUart3TxSem above)
+  *         uart1_transmit_dma()/uart3_transmit_dma() call (see
+  *         xUart1TxTask/xUart3TxTask above)
   * @param  huart UART handle that completed transmission
   * @retval None
   */
@@ -118,11 +135,51 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     }
     else if(huart->Instance == USART3)
     {
-        xSemaphoreGiveFromISR(xUart3TxSem, &xHigherPriorityTaskWoken);
+        vTaskNotifyGiveFromISR(xUart3TxTask, &xHigherPriorityTaskWoken);
     }
     else
     {
         return;
+    }
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+/**
+  * @brief  HAL UART error callback: logs the most common line/DMA errors
+  *         on USART1/USART3 (parity, noise, framing, overrun, DMA)
+  * @param  huart UART handle that reported the error
+  * @retval None
+  */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if(huart->Instance != USART1 && huart->Instance != USART3)
+    {
+        return;
+    }
+
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    const char *port = (huart->Instance == USART1) ? "USART1" : "USART3";
+
+    if(huart->ErrorCode & HAL_UART_ERROR_ORE)
+    {
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s overrun error\r\n", port)
+    }
+    else if(huart->ErrorCode & HAL_UART_ERROR_FE)
+    {
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s frame error\r\n", port)
+    }
+    else if(huart->ErrorCode & HAL_UART_ERROR_NE)
+    {
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s noise error\r\n", port)
+    }
+    else if(huart->ErrorCode & HAL_UART_ERROR_PE)
+    {
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s parity error\r\n", port)
+    }
+    else if(huart->ErrorCode & HAL_UART_ERROR_DMA)
+    {
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s DMA error\r\n", port)
     }
 
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
@@ -170,7 +227,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
         HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
 
         /* Needed for the DMA-TX completion handshake, not for RX (USART3 is
-         * TX-only here) - see USART3_IRQHandler */
+         * TX-only here); see USART3_IRQHandler */
         HAL_NVIC_SetPriority(USART3_IRQn, UART_IRQ_PRIORITY, 0);
         HAL_NVIC_EnableIRQ(USART3_IRQn);
 
@@ -182,7 +239,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
         __HAL_RCC_USART1_CLK_ENABLE();
         __HAL_RCC_GPIOA_CLK_ENABLE();
 
-        /* PA9 = USART1_TX, PA10 = USART1_RX (AF7) - SARA-R412M modem link */
+        /* PA9 = USART1_TX, PA10 = USART1_RX (AF7); SARA-R412M modem link */
         GPIO_InitTypeDef gpio = {0};
         gpio.Pin = GPIO_PIN_9 | GPIO_PIN_10;
         gpio.Mode = GPIO_MODE_AF_PP;
@@ -230,23 +287,17 @@ void uart3_init(void)
     huart3.Init.WordLength = UART_WORDLENGTH_8B;
     huart3.Init.StopBits = UART_STOPBITS_1;
     huart3.Init.Parity = UART_PARITY_NONE;
-    huart3.Init.Mode = UART_MODE_TX_RX;
+    huart3.Init.Mode = UART_MODE_TX;
     huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
     huart3.Init.OverSampling = UART_OVERSAMPLING_16;
 
     configASSERT(HAL_UART_Init(&huart3) == HAL_OK);
-
-    xUart3TxSem = xSemaphoreCreateBinary();
-
-    configASSERT(xUart3TxSem != NULL);
-
-    xSemaphoreGive(xUart3TxSem); /* starts "available" - no transfer in flight yet */
 }
 
 /**
   * @brief  Sends `len` bytes on UART3 via DMA, blocking until any previous
-  *         transfer has completed (serialized via xUart3TxSem). Safe to call
-  *         from multiple tasks
+  *         transfer has completed. Must only ever be called from one task
+  *         (DebugTask); see xUart3TxTask above
   * @param  data Bytes to send
   * @param  len Number of bytes in `data`
   * @param  timeout_ms Maximum time to wait for a previous transfer to free
@@ -256,14 +307,20 @@ void uart3_init(void)
   */
 bool uart3_transmit_dma(const uint8_t *data, uint16_t len, uint32_t timeout_ms)
 {
-    if(xSemaphoreTake(xUart3TxSem, pdMS_TO_TICKS(timeout_ms)) == pdFALSE)
+    if(xUart3TxTask == NULL)
+    {
+        xUart3TxTask = xTaskGetCurrentTaskHandle();
+        xTaskNotifyGive(xUart3TxTask); /* starts "available"; no transfer in flight yet */
+    }
+
+    if(ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout_ms)) == 0)
     {
         return false;
     }
 
     if(HAL_UART_Transmit_DMA(&huart3, data, len) != HAL_OK)
     {
-        xSemaphoreGive(xUart3TxSem);
+        xTaskNotifyGive(xUart3TxTask);
         return false;
     }
 
@@ -271,8 +328,35 @@ bool uart3_transmit_dma(const uint8_t *data, uint16_t len, uint32_t timeout_ms)
 }
 
 /**
+  * @brief  Emergency byte-by-byte write to USART3, used by configASSERT()
+  *         and DebugTask() as a fallback. Polls the register directly,
+  *         bypassing DMA/FreeRTOS entirely, so it still works with
+  *         interrupts disabled or the scheduler dead
+  * @param  msg NUL-terminated string to write, clamped to
+  *         UART3_PANIC_WRITE_MAX_LEN in case it never terminates
+  * @retval None
+  */
+void uart3_panic_write(const char *msg)
+{
+    /* cppcheck infers a fixed array size from one configASSERT() literal here
+     * and flags the i<64 bound; every real caller passes a NUL-terminated
+     * literal, so the loop always stops at '\0' first, never out of bounds */
+    // cppcheck-suppress arrayIndexOutOfBoundsCond
+    for(size_t i = 0; i < UART3_PANIC_WRITE_MAX_LEN && msg[i] != '\0'; i++)
+    {
+        while(!(USART3->SR & USART_SR_TXE))
+        {
+        }
+
+        USART3->DR = (uint8_t)msg[i];
+    }
+}
+
+/**
   * @brief  Initializes USART1 (115200 8N1) for the SARA-R412M modem link and
-  *         arms interrupt-driven RX into the internal stream buffer
+  *         arms interrupt-driven RX into the internal stream buffer. No
+  *         RTS/CTS here; on real hardware the module's own RTS pin must be
+  *         tied low on the board, or it won't accept AT commands at all
   * @retval None
   */
 void uart1_init(void)
@@ -291,13 +375,13 @@ void uart1_init(void)
 
     configASSERT(xUart1Rx != NULL);
 
-    HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1);
+    configASSERT(HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1) == HAL_OK);
 }
 
 /**
   * @brief  Sends `len` bytes on UART1 via DMA, blocking until any previous
   *         transfer has completed. Must only ever be called from one task
-  *         (ModemTask) - see xUart1TxTask above
+  *         (ModemTask); see xUart1TxTask above
   * @param  data Bytes to send
   * @param  len Number of bytes in `data`
   * @param  timeout_ms Maximum time to wait for a previous transfer to free
@@ -310,7 +394,7 @@ bool uart1_transmit_dma(const uint8_t *data, uint16_t len, uint32_t timeout_ms)
     if(xUart1TxTask == NULL)
     {
         xUart1TxTask = xTaskGetCurrentTaskHandle();
-        xTaskNotifyGive(xUart1TxTask); /* starts "available" - no transfer in flight yet */
+        xTaskNotifyGive(xUart1TxTask); /* starts "available"; no transfer in flight yet */
     }
 
     if(ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout_ms)) == 0)
@@ -342,7 +426,7 @@ bool uart1_wait_char(char expected, uint32_t timeout_ms)
     for(;;)
     {
         TickType_t elapsed = xTaskGetTickCount() - start;
-        
+
         if(elapsed >= timeout_ticks)
         {
             return false;
