@@ -2,9 +2,9 @@
   ******************************************************************************
   * @file    modem_payload.h
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-08-25
+  * @date    2026-09-17
   * @brief   Pure (no FreeRTOS/HAL dependency) helpers for building the
-  *          AT+UMQTTC publish command from a SensorSample_t - split out of
+  *          AT+UMQTTC publish command from a SensorSample_t; split out of
   *          modem.c so they can be unit-tested on the host, see
   *          firmware/unit_tests/modem/test_modem.c
   ******************************************************************************

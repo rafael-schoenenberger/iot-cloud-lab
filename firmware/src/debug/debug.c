@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    debug.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-16
+  * @date    2026-09-17
   * @brief   Dedicated debug-output task: DebugTask alone owns UART3 debug
   *          output, draining qDebugLog and printing each message via DMA -
   *          see debug_log()
@@ -109,5 +109,20 @@ void DebugTask(void *argument)
                 uart3_panic_write("DebugTask: uart3_transmit_dma failed\r\n");
             }
         }
+    }
+}
+
+/**
+  * @brief  Called if vTaskStartScheduler() ever returns (should never
+  *         happen); reports it over UART3 and halts
+  * @retval None
+  */
+void scheduler_start_failed(void)
+{
+    uart3_panic_write("Scheduler failed to start\r\n");
+    taskDISABLE_INTERRUPTS();
+
+    for(;;)
+    {
     }
 }

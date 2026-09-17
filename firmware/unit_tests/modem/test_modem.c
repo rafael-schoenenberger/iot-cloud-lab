@@ -2,9 +2,9 @@
   ******************************************************************************
   * @file    test_modem.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-08-25
+  * @date    2026-09-17
   * @brief   Host-side Unity tests for modem_payload.c (hex_encode and
-  *          modem_build_publish_cmd) - no FreeRTOS/HAL/hardware involved.
+  *          modem_build_publish_cmd); no FreeRTOS/HAL/hardware involved.
   *          "Filling the queue" is simulated by constructing a SensorSample_t
   *          directly and passing it in, standing in for what TempTask would
   *          have pushed onto qSensorData
@@ -13,10 +13,9 @@
 
 #include "unity.h"
 #include "modem_payload.h"
-#include <string.h>
 
 /**
-  * @brief  Unity per-test setup hook. Nothing to do - modem_payload.c has no
+  * @brief  Unity per-test setup hook. Nothing to do; modem_payload.c has no
   *         state to reset between tests
   * @retval None
   */
@@ -64,7 +63,7 @@ static void test_hex_encode_empty_input(void)
 /**
   * @brief  hex_encode() truncates instead of overflowing `out` when
   *         `out_size` is too small for the full input. out_size=3 leaves
-  *         room for exactly one byte's hex pair + NUL - the 2nd input
+  *         room for exactly one byte's hex pair + NUL; the 2nd input
   *         byte's pair (i*2+2 == 4) no longer satisfies "< out_size", so it
   *         and everything after it is dropped
   * @retval None
@@ -75,6 +74,21 @@ static void test_hex_encode_truncates_to_fit_out_size(void)
 
     hex_encode(HEX_ENCODE_TRUNCATE_INPUT, out, sizeof(out));
     TEST_ASSERT_EQUAL_STRING(HEX_ENCODE_TRUNCATE_EXPECTED, out);
+}
+
+#define HEX_ENCODE_ZERO_SIZE_SENTINEL 'X'
+
+/**
+  * @brief  hex_encode() with out_size=0 must not write anything to `out`
+  *         (regression test for a former 1-byte out-of-bounds write)
+  * @retval None
+  */
+static void test_hex_encode_zero_out_size_is_a_no_op(void)
+{
+    char out[1] = { HEX_ENCODE_ZERO_SIZE_SENTINEL };
+
+    hex_encode(HEX_ENCODE_BASIC_INPUT, out, 0);
+    TEST_ASSERT_EQUAL_CHAR(HEX_ENCODE_ZERO_SIZE_SENTINEL, out[0]);
 }
 
 /* Shared by both modem_build_publish_cmd() tests below */
@@ -108,7 +122,7 @@ static void test_modem_build_publish_cmd_matches_known_good_output(void)
 
 /**
   * @brief  modem_build_publish_cmd() with a negative temp_c (int8_t, so
-  *         negative values are valid input) - checks the JSON/hex-encoding
+  *         negative values are valid input); checks the JSON/hex-encoding
   *         handles the sign correctly
   * @retval None
   */
@@ -126,6 +140,25 @@ static void test_modem_build_publish_cmd_handles_negative_temp(void)
         cmd);
 }
 
+#define CMD_TRUNCATE_BUF_LEN 10
+#define CMD_TRUNCATE_EXPECTED "AT+UMQTTC"
+
+/**
+  * @brief  modem_build_publish_cmd() truncates instead of overflowing `cmd`
+  *         when `cmd_size` is too small: it builds the command via
+  *         snprintf() (see modem_payload.c), which never writes past
+  *         `cmd_size` and always NUL-terminates
+  * @retval None
+  */
+static void test_modem_build_publish_cmd_truncates_to_fit_cmd_size(void)
+{
+    SensorSample_t sample = { .temp_c = KNOWN_GOOD_TEMP_C, .uptime_ms = KNOWN_GOOD_UPTIME_MS };
+    char cmd[CMD_TRUNCATE_BUF_LEN];
+
+    modem_build_publish_cmd(sample, cmd, sizeof(cmd));
+    TEST_ASSERT_EQUAL_STRING(CMD_TRUNCATE_EXPECTED, cmd);
+}
+
 /**
   * @brief  Test runner entry point: registers and runs all test_*() cases
   * @retval int Unity's aggregate result (0 if all tests passed)
@@ -137,8 +170,10 @@ int main(void)
     RUN_TEST(test_hex_encode_basic);
     RUN_TEST(test_hex_encode_empty_input);
     RUN_TEST(test_hex_encode_truncates_to_fit_out_size);
+    RUN_TEST(test_hex_encode_zero_out_size_is_a_no_op);
     RUN_TEST(test_modem_build_publish_cmd_matches_known_good_output);
     RUN_TEST(test_modem_build_publish_cmd_handles_negative_temp);
+    RUN_TEST(test_modem_build_publish_cmd_truncates_to_fit_cmd_size);
 
     return UNITY_END();
 }

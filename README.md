@@ -94,7 +94,7 @@ All public functions carry Doxygen (`@brief`/`@param`/`@retval`) comments.
 
 `modem/modem_payload.c` (building the AT+UMQTTC publish command from a sensor sample) and `debug/debug_format.c` (the pure string-formatting half of `DebugTask`) are both deliberately kept free of any FreeRTOS/HAL dependency, so `firmware/unit_tests/` can compile and run them directly with plain `gcc` in the same container, with no ARM cross-compilation and no Renode needed just to test this logic.
 
-`ModemTask`'s MQTT/AT bring-up (certificate upload + connect) runs exactly once at boot. For simplicity, this relies on the reliability of the simulated modem/connection rather than implementing reconnect logic; reconnect handling will be needed for a final real-world-like simulation.
+`ModemTask`'s MQTT/AT bring-up (certificate upload + connect) restarts the entire sequence from the beginning after any failed step, including a failed publish, waiting 5 seconds between attempts, so a dropped connection or a temporarily unreachable network is retried rather than left broken until the next boot.
 
 ## Cloud Pipeline
 

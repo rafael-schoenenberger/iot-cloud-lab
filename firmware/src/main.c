@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    main.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-16
+  * @date    2026-09-17
   * @brief   Application entry point: HAL/FreeRTOS bring-up, peripheral
   *          initialization and task creation for the temperature-to-AWS-IoT
   *          telemetry pipeline (TempTask -> qSensorData -> ModemTask)
@@ -26,10 +26,9 @@
 
 /**
   * @brief  Application entry point. Brings up the HAL and system clock,
-  *         initializes the UART/I2C peripherals, creates the sensor queue
-  *         and the application tasks, then starts the FreeRTOS scheduler
-  * @retval int Never returns - vTaskStartScheduler() only returns on failure,
-  *         in which case execution falls into the trailing infinite loop
+  *         initializes the UART/I2C peripherals, creates the sensor/
+  *         debug-log queues and the application tasks, then starts FreeRTOS
+  * @retval int never returns except on scheduler-start failure
   */
 int main(void)
 {
@@ -58,6 +57,7 @@ int main(void)
 
     while(1)
     {
-        /* unreachable: vTaskStartScheduler() only returns on failure */
+        /* unreachable in practice */
+        scheduler_start_failed();
     }
 }

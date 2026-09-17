@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    modem_payload.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-15
+  * @date    2026-09-17
   * @brief   Pure (no FreeRTOS/HAL dependency) helpers for building the
   *          AT+UMQTTC publish command from a SensorSample_t
   ******************************************************************************
@@ -18,7 +18,7 @@
   *         message as a quoted string parameter, but our payloads are JSON
   *         containing literal '"' characters, which a quoted-parameter AT
   *         parser cannot tell apart from the closing quote. Hex-encoding
-  *         (hex_mode=1, see 24.5.3) sidesteps that entirely
+  *         (hex_mode=1, see 28.6) sidesteps that entirely
   * @param  in NUL-terminated input string
   * @param  out Buffer receiving the NUL-terminated hex string
   * @param  out_size Size of `out` in bytes
@@ -28,6 +28,11 @@ void hex_encode(const char *in, char *out, size_t out_size)
 {
     static const char hex_chars[] = "0123456789abcdef";
     size_t i = 0;
+
+    if(out_size == 0)
+    {
+        return;
+    }
 
     for(; in[i] != '\0' && (i*2 + 2) < out_size; i++)
     {

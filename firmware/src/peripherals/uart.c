@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    uart.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-16
+  * @date    2026-09-17
   * @brief   USART3 (debug console) and USART1 (SARA-R412M modem link)
   *          initialization, DMA-driven TX for both, ISR-driven single-byte
   *          RX for USART1, and blocking helpers for reading AT command
@@ -19,7 +19,9 @@
 #define USART3_BAUD_RATE 921600
 #define USART1_BAUD_RATE 115200
 
-#define UART1_RX_BUF_LEN 128
+/* Sized for the longest echoed command (ATE1, the factory default) plus
+ * its response: the AT+UMQTTC publish command */
+#define UART1_RX_BUF_LEN 256
 
 /* Hard cap for uart3_panic_write(), in case msg is ever not NUL-terminated */
 #define UART3_PANIC_WRITE_MAX_LEN 64

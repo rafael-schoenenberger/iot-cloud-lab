@@ -1,33 +1,36 @@
 """Simulates a u-blox SARA-R412M cellular modem's AT command interface over
 Renode's UART1 TCP relay (see renode/scripts/stm32f4.resc). Implements just
 enough of the official AT command set for the firmware's ModemTask to drive
-a real MQTT/TLS connection to AWS IoT Core - see the u-blox SARA-R4/N4 AT
+a real MQTT/TLS connection to AWS IoT Core; see the u-blox SARA-R4/N4 AT
 Commands Manual (UBX-17003787-R10):
+  - Section 10.20 (Command echo E): every command line is echoed back before
+    its result code, matching the factory-programmed ATE1 default; the
+    firmware never sends ATE0, so this is unconditional here.
   - Section 13 (Packet switched data services): AT+CGDCONT/+CGATT/+CGACT are
     accepted and always answered OK. There is no real cellular network here
-    to attach to - the firmware still sends them (matching real hardware,
+    to attach to; the firmware still sends them (matching real hardware,
     where the Cat-M1 SARA-R412M auto-attaches and auto-activates its PDP
     context, so the host only needs to define the APN and can otherwise
     treat this as a formality) but this simulator has nothing to do beyond
     acknowledging them.
-  - Section 19 (SSL/TLS): AT+USECMNG imports the CA/client cert/client key,
-    streamed as raw bytes after a '>' prompt exactly like the real modem
-    (see 19.2 "Import a certificate or private key from serial I/O").
-  - Section 24 (MQTT): AT+UMQTT configures the modem's built-in MQTT client,
-    AT+UMQTTC triggers connect/publish. The modem (real or simulated) owns
-    the whole TLS+MQTT stack - the firmware never sees a raw socket.
+  - Section 19 (SSL/TLS) in R10, section 20.3.2 in the newer R22 revision:
+    AT+USECMNG imports the CA/client cert/client key, streamed as raw bytes
+    after a '>' prompt exactly like the real modem.
+  - Section 24 (MQTT) in R10, section 28 in the newer R22 revision:
+    AT+UMQTT configures the modem's built-in MQTT client, AT+UMQTTC triggers
+    connect/publish. The modem (real or simulated) owns the whole TLS+MQTT
+    stack; the firmware never sees a raw socket.
 
 The certificates received via AT+USECMNG are what this simulator actually
-uses to open a *real* TLS connection to AWS IoT Core via paho-mqtt - the AT
+uses to open a *real* TLS connection to AWS IoT Core via paho-mqtt; the AT
 layer is not decorative, it is the only path the cert bytes travel.
 
 Publish payloads are always sent hex-encoded (AT+UMQTTC=2,<QoS>,<retain>,1,
-<topic>,<hex message>, hex_mode=1 per 24.5.3) rather than as a quoted ASCII
+<topic>,<hex message>, hex_mode=1 per 28.6) rather than as a quoted ASCII
 string: our payloads are JSON and contain literal '"' characters, which a
 naive quoted-string AT parameter parser cannot distinguish from the closing
-quote of the <message> parameter. Hex has no such ambiguity - no quotes, no
-commas - which is exactly the documented purpose of that parameter.
-"""
+quote of the <message> parameter. Hex has no such ambiguity, no quotes, no
+commas, which is exactly the documented purpose of that parameter."""
 
 import hashlib
 import os
@@ -45,7 +48,7 @@ RENODE_PORT = 9006
 
 CERT_TYPE_NAMES = {0: "CA", 1: "CC", 2: "PK"}
 
-# Checked by the Dockerfile's HEALTHCHECK - present only while a real MQTT
+# Checked by the Dockerfile's HEALTHCHECK; present only while a real MQTT
 # session with AWS IoT is up (see Modem._set_healthy).
 HEALTH_FILE = pathlib.Path("/tmp/mqtt_healthy")
 
@@ -97,7 +100,7 @@ class LineReader:
             self._fill()
         idx_candidates = [i for i in (self.buf.find(b"\r"), self.buf.find(b"\n")) if i != -1]
         idx = min(idx_candidates)
-        # A \r\n terminator can arrive split across two TCP reads - wait for
+        # A \r\n terminator can arrive split across two TCP reads; wait for
         # a second byte before deciding whether it's a 1- or 2-byte
         # terminator, or a stray leftover byte corrupts the next read_exact().
         while len(self.buf) < idx + 2:
@@ -131,7 +134,7 @@ class Modem:
             else:
                 HEALTH_FILE.unlink(missing_ok=True)
         except OSError:
-            pass  # advisory only - never let this take the modem down
+            pass  # advisory only; never let this take the modem down
 
     def send(self, text):
         with self.send_lock:
@@ -151,10 +154,14 @@ class Modem:
             if not line:
                 continue
             print(f"< {line}", flush=True)
+            # Command echo E (10.20): factory default is ATE1 (echo on), and
+            # the firmware never sends ATE0, so every command line is echoed
+            # back before its result code, like the real modem would
+            self.send(f"{line}\r\n")
             try:
                 self.handle(line)
             except (ValueError, IndexError, KeyError) as exc:
-                # Malformed/unexpected AT parameters - stay up and answer
+                # Malformed/unexpected AT parameters; stay up and answer
                 # ERROR like a real modem would, instead of taking the whole
                 # process down (there's no restart: policy on this container).
                 print(f"Malformed AT command '{line}': {exc}", flush=True)
@@ -279,8 +286,8 @@ class Modem:
                     os.unlink(path)
 
     def _on_mqtt_connect(self, client, userdata, flags, reason_code, properties):
-        # Fires once the broker acks (or rejects) the CONNECT - the +UUMQTTC
-        # URC (24.5.4) has to be sent from here, not after connect() returns.
+        # Fires once the broker acks (or rejects) the CONNECT; the +UUMQTTC
+        # URC (28.6) has to be sent from here, not after connect() returns.
         if reason_code == 0:
             print(f"MQTT connected to {self.mqtt_server}:{self.mqtt_port} as '{self.mqtt_client_id}'", flush=True)
             self._set_healthy(True)
@@ -298,7 +305,7 @@ class Modem:
 
     @staticmethod
     def _abandon(client):
-        # loop_stop() joins the network thread - calling it here would
+        # loop_stop() joins the network thread; calling it here would
         # deadlock, since this callback runs on that same thread.
         threading.Thread(target=client.loop_stop, daemon=True).start()
 
@@ -321,7 +328,7 @@ def connect():
         try:
             sock = socket.create_connection((RENODE_HOST, RENODE_PORT), timeout=10)
             # create_connection()'s timeout lingers on the socket for every
-            # future recv() too - clear it so idle gaps aren't mistaken for a dead link.
+            # future recv() too; clear it so idle gaps aren't mistaken for a dead link.
             sock.settimeout(None)
             print(f"Connected to Renode UART1 relay at {RENODE_HOST}:{RENODE_PORT}", flush=True)
             return sock
