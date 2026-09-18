@@ -30,11 +30,12 @@ Publish payloads are always sent hex-encoded (AT+UMQTTC=2,<QoS>,<retain>,1,
 string: our payloads are JSON and contain literal '"' characters, which a
 naive quoted-string AT parameter parser cannot distinguish from the closing
 quote of the <message> parameter. Hex has no such ambiguity, no quotes, no
-commas, which is exactly the documented purpose of that parameter."""
+commas, which is exactly the documented purpose of that parameter"""
 
 import hashlib
 import os
 import pathlib
+import re
 import socket
 import ssl
 import tempfile
@@ -55,7 +56,8 @@ HEALTH_FILE = pathlib.Path("/tmp/mqtt_healthy")
 
 def parse_params(body):
     """Split an AT command's comma-separated parameter string into tokens,
-    respecting double-quoted strings (which may contain commas/spaces)."""
+    respecting double-quoted strings (which may contain commas/spaces).
+    E.g. '0,0,"AWS-CA",1188' -> ["0", "0", "AWS-CA", "1188"]"""
     params = []
     i, n = 0, len(body)
     while i < n:
@@ -77,46 +79,58 @@ def parse_params(body):
 class LineReader:
     """Reads AT command lines (terminated by \\r and/or \\n) or a fixed
     number of raw bytes (for AT+USECMNG's binary cert upload) off one
-    socket, buffering whatever was over-read for the next call."""
+    socket, buffering whatever was over-read for the next call"""
 
     def __init__(self, sock):
+        """Wraps `sock`, an already-connected UART1 socket"""
         self.sock = sock
         self.buf = b""
 
     def _fill(self):
+        """Blocks for at least one more chunk of bytes from the socket and
+        appends it to `buf`"""
         chunk = self.sock.recv(4096)
         if not chunk:
             raise ConnectionError("UART1 socket closed")
         self.buf += chunk
 
     def read_exact(self, count):
+        """Blocks until `count` bytes are buffered, then consumes and
+        returns exactly that many (used for AT+USECMNG's raw byte stream)"""
         while len(self.buf) < count:
             self._fill()
         data, self.buf = self.buf[:count], self.buf[count:]
         return data
 
     def read_line(self):
+        """Blocks until a full '\\r'/'\\n'-terminated line is buffered, then
+        consumes and returns it with the terminator stripped"""
         while b"\r" not in self.buf and b"\n" not in self.buf:
             self._fill()
-        idx_candidates = [i for i in (self.buf.find(b"\r"), self.buf.find(b"\n")) if i != -1]
-        idx = min(idx_candidates)
+        # [\r\n] is a character class: matches a single \r or \n
+        idx = re.search(rb"[\r\n]", self.buf).start()
+
         # A \r\n terminator can arrive split across two TCP reads; wait for
         # a second byte before deciding whether it's a 1- or 2-byte
         # terminator, or a stray leftover byte corrupts the next read_exact().
-        while len(self.buf) < idx + 2:
+        while len(self.buf) < idx+2:
             self._fill()
-        line = self.buf[:idx]
-        rest = self.buf[idx:idx + 2]
-        skip = 2 if rest in (b"\r\n", b"\n\r") else 1
-        self.buf = self.buf[idx + skip:]
+
+        term_len = 2 if self.buf[idx:idx+2] in (b"\r\n", b"\n\r") else 1
+        line, self.buf = self.buf[:idx], self.buf[idx+term_len:]
+
         return line.decode(errors="replace")
 
 
 class Modem:
+    """Owns one UART1 connection: parses AT command lines from the firmware
+    and drives a real MQTT/TLS session to AWS IoT Core on its behalf"""
+
     def __init__(self, sock):
+        """Wraps `sock`; starts unhealthy until a real MQTT session connects"""
         self.sock = sock
         self.reader = LineReader(sock)
-        self.certs = {}  # cert type (0=CA/1=client cert/2=client key) -> raw bytes from USECMNG
+        self.certs = {}  # cert type (0=CA / 1=client cert / 2=client key) -> raw bytes from USECMNG
         self.mqtt_client_id = ""
         self.mqtt_server = None
         self.mqtt_port = 8883
@@ -128,6 +142,8 @@ class Modem:
 
     @staticmethod
     def _set_healthy(healthy):
+        """Toggles HEALTH_FILE's existence, the advisory signal the
+        Dockerfile's HEALTHCHECK polls"""
         try:
             if healthy:
                 HEALTH_FILE.touch()
@@ -137,18 +153,23 @@ class Modem:
             pass  # advisory only; never let this take the modem down
 
     def send(self, text):
+        """Thread-safely writes `text` to the UART1 socket (see send_lock)"""
         with self.send_lock:
             self.sock.sendall(text.encode())
 
     def reply_ok(self, info=None):
+        """Sends an optional info line, then the final 'OK' result code"""
         if info:
             self.send(f"\r\n{info}\r\n")
         self.send("\r\nOK\r\n")
 
     def reply_error(self):
+        """Sends the final 'ERROR' result code"""
         self.send("\r\nERROR\r\n")
 
     def run(self):
+        """MAIN LOOP: reads one AT command line at a time, echoes it back,
+        then dispatches it to handle(), staying up on malformed input"""
         while True:
             line = self.reader.read_line().strip()
             if not line:
@@ -160,7 +181,7 @@ class Modem:
             self.send(f"{line}\r\n")
             try:
                 self.handle(line)
-            except (ValueError, IndexError, KeyError) as exc:
+            except (ValueError, IndexError) as exc:
                 # Malformed/unexpected AT parameters; stay up and answer
                 # ERROR like a real modem would, instead of taking the whole
                 # process down (there's no restart: policy on this container).
@@ -168,13 +189,18 @@ class Modem:
                 self.reply_error()
 
     def handle(self, line):
+        """Parses one AT command line and dispatches it to the matching
+        handler, or replies OK/ERROR directly for the simpler cases"""
         if not line.upper().startswith("AT"):
             self.reply_error()
             return
+
         body = line[2:]
+
         if body == "":
             self.reply_ok()
             return
+        
         if not body.startswith("+"):
             self.reply_ok()  # permissive default for basic V.25ter commands
             return
@@ -188,7 +214,7 @@ class Modem:
             name, rest = body, ""
         name = name.upper()
 
-        if name in ("CGDCONT", "CGATT", "CGACT", "CFUN", "CEREG", "CREG"):
+        if name in ("CGDCONT", "CGATT", "CGACT"):
             self.reply_ok()
         elif name == "USECMNG":
             self.handle_usecmng(rest)
@@ -202,33 +228,44 @@ class Modem:
             self.reply_ok()  # be permissive about anything else the firmware sends
 
     def handle_usecmng(self, rest):
+        """Handles AT+USECMNG: reads the raw cert/key bytes after the '>'
+        prompt and stores them, keyed by cert type"""
         params = parse_params(rest)
         op_code, cert_type, internal_name, data_size = int(params[0]), int(params[1]), params[2], int(params[3])
+
         if op_code != 0:
             self.reply_error()
             return
+
         self.send("\r\n>")
         data = self.reader.read_exact(data_size)
         self.certs[cert_type] = data
         md5 = hashlib.md5(data).hexdigest()
         type_name = CERT_TYPE_NAMES.get(cert_type, "?")
         print(f"Stored {type_name} cert '{internal_name}' ({data_size} bytes, md5 {md5})", flush=True)
-        self.reply_ok(f'+USECMNG: 0,{cert_type},"{internal_name}","{md5}"')
+        self.reply_ok(f'+USECMNG: {op_code},{cert_type},"{internal_name}","{md5}"')
 
     def handle_umqtt(self, rest):
+        """Handles AT+UMQTT: stores the client ID or server/port for the
+        later AT+UMQTTC connect"""
         params = parse_params(rest)
         op_code = int(params[0])
+
         if op_code == 0:
             self.mqtt_client_id = params[1]
         elif op_code == 2:
             self.mqtt_server = params[1]
             if len(params) > 2 and params[2] != "":
                 self.mqtt_port = int(params[2])
+
         self.reply_ok(f"+UMQTT: {op_code},1")
 
     def handle_umqttc(self, rest):
+        """Handles AT+UMQTTC: connect, publish, or disconnect, depending on
+        op_code"""
         params = parse_params(rest)
         op_code = int(params[0])
+
         if op_code == 1:
             self.reply_ok("+UMQTTC: 1,1")
             self.mqtt_connect()
@@ -247,7 +284,10 @@ class Modem:
             self.reply_error()
 
     def mqtt_connect(self):
+        """Opens a real MQTT/TLS connection to AWS IoT Core using the certs
+        received earlier via AT+USECMNG"""
         ca_path = cert_path = key_path = None
+
         try:
             ca_bytes, cert_bytes, key_bytes = self.certs[0], self.certs[1], self.certs[2]
             with tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as ca_f:
@@ -264,14 +304,17 @@ class Modem:
                 callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
                 client_id=self.mqtt_client_id,
             )
+
             client.on_connect = self._on_mqtt_connect
             client.on_disconnect = self._on_mqtt_disconnect
+
             client.tls_set(
                 ca_certs=ca_path,
                 certfile=cert_path,
                 keyfile=key_path,
                 tls_version=ssl.PROTOCOL_TLS_CLIENT,
             )
+            
             client.connect(self.mqtt_server, self.mqtt_port)
             self.mqtt_client = client
             client.loop_start()
@@ -283,54 +326,81 @@ class Modem:
         finally:
             for path in (ca_path, cert_path, key_path):
                 if path:
-                    os.unlink(path)
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
 
     def _on_mqtt_connect(self, client, userdata, flags, reason_code, properties):
+        """paho callback: reports the broker's CONNECT result to the
+        firmware as the async +UUMQTTC login result URC"""
         # Fires once the broker acks (or rejects) the CONNECT; the +UUMQTTC
         # URC (28.6) has to be sent from here, not after connect() returns.
-        if reason_code == 0:
-            print(f"MQTT connected to {self.mqtt_server}:{self.mqtt_port} as '{self.mqtt_client_id}'", flush=True)
-            self._set_healthy(True)
-            self.send("\r\n+UUMQTTC: 1,0\r\n")
-        else:
-            print(f"MQTT connect rejected by broker: {reason_code}", flush=True)
-            self.mqtt_client = None
-            self._set_healthy(False)
-            self._abandon(client)
-            self.send("\r\n+UUMQTTC: 1,3\r\n")
+        # This runs on paho's own network thread, not the main thread, so an
+        # unhandled exception here would just silently kill that thread
+        # instead of reaching main()'s reconnect logic.
+        try:
+            if reason_code == 0:
+                print(f"MQTT connected to {self.mqtt_server}:{self.mqtt_port} as '{self.mqtt_client_id}'", flush=True)
+                self._set_healthy(True)
+                self.send("\r\n+UUMQTTC: 1,0\r\n")
+            else:
+                print(f"MQTT connect rejected by broker: {reason_code}", flush=True)
+                self.mqtt_client = None
+                self._set_healthy(False)
+                self._abandon(client)
+                self.send("\r\n+UUMQTTC: 1,3\r\n")
+        except OSError as exc:
+            print(f"Failed to notify firmware of MQTT connect result: {exc}", flush=True)
 
     def _on_mqtt_disconnect(self, client, userdata, flags, reason_code, properties):
+        """paho callback: fires whenever the MQTT session drops, for any
+        reason (clean logout, broker-side timeout, network loss)"""
         print(f"MQTT disconnected: {reason_code}", flush=True)
         self._set_healthy(False)
 
     @staticmethod
     def _abandon(client):
+        """Stops `client`'s network loop from a separate thread"""
         # loop_stop() joins the network thread; calling it here would
         # deadlock, since this callback runs on that same thread.
         threading.Thread(target=client.loop_stop, daemon=True).start()
 
     def mqtt_disconnect(self):
+        """Cleanly disconnects and stops the current MQTT session, if any"""
         if self.mqtt_client:
-            self.mqtt_client.disconnect()
-            self.mqtt_client.loop_stop()
+            try:
+                self.mqtt_client.disconnect()
+                self.mqtt_client.loop_stop()
+            except Exception as exc:
+                print(f"MQTT disconnect failed: {exc}", flush=True)
             self.mqtt_client = None
 
     def mqtt_publish(self, topic, message, qos, retain):
+        """Publishes to `topic` if currently connected, otherwise drops the
+        message"""
         if not self.mqtt_client or not self.mqtt_client.is_connected():
             print(f"Publish to '{topic}' requested but MQTT is not connected, dropping", flush=True)
             return
-        self.mqtt_client.publish(topic, message, qos=qos, retain=bool(retain))
-        print(f"Published to '{topic}': {message}", flush=True)
+        try:
+            self.mqtt_client.publish(topic, message, qos=qos, retain=bool(retain))
+            print(f"Published to '{topic}': {message}", flush=True)
+        except Exception as exc:
+            print(f"MQTT publish to '{topic}' failed: {exc}", flush=True)
 
 
 def connect():
+    """Blocks, retrying every 3s, until Renode's UART1 relay accepts a
+    connection, then returns the connected socket"""
     while True:
         try:
             sock = socket.create_connection((RENODE_HOST, RENODE_PORT), timeout=10)
             # create_connection()'s timeout lingers on the socket for every
             # future recv() too; clear it so idle gaps aren't mistaken for a dead link.
             sock.settimeout(None)
-            print(f"Connected to Renode UART1 relay at {RENODE_HOST}:{RENODE_PORT}", flush=True)
+            local_ip, local_port = sock.getsockname()
+            print(f"Connected to Renode UART1 relay at {RENODE_HOST}:{RENODE_PORT} "
+                  f"(from {local_ip}:{local_port})", flush=True)
             return sock
         except OSError as exc:
             print(f"Waiting for Renode UART1 relay ({exc}), retrying in 3s...", flush=True)
@@ -338,12 +408,14 @@ def connect():
 
 
 def main():
+    """Entry point: connects, runs one Modem session until the UART1 link
+    drops, then reconnects and starts a fresh one, forever"""
     while True:
         sock = connect()
         modem = Modem(sock)
         try:
             modem.run()
-        except (ConnectionError, OSError) as exc:
+        except OSError as exc:
             print(f"Lost UART1 connection ({exc}), reconnecting...", flush=True)
         finally:
             sock.close()

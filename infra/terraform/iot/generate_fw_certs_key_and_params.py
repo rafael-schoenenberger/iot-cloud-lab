@@ -3,7 +3,7 @@
 by run.ps1 after `terraform apply`, or manually whenever the AWS IoT
 Thing/certs change. This is not part of the Docker build, since the
 firmware image only ever sees the generated header, never AWS credentials
-or Terraform itself."""
+or Terraform itself"""
 
 import datetime
 import json
@@ -20,7 +20,7 @@ OUTPUT = SCRIPT_DIR.parent.parent.parent / "firmware" / "src" / "aws_certs_key_p
 def terraform_outputs():
     """Runs `terraform output -json`; shells out via the CLI since
     terraform.tfstate's JSON layout isn't a stable API, and provider.tf
-    has a prepared (commented-out) S3 remote backend."""
+    has a prepared (commented-out) S3 remote backend"""
     result = subprocess.run(
         ["terraform", "output", "-json"],
         cwd=SCRIPT_DIR, capture_output=True, text=True,
@@ -33,7 +33,7 @@ def terraform_outputs():
 
 def main():
     """Reads the Terraform outputs and the 3 cert/key files from certs/,
-    then writes them all into OUTPUT as a single generated C header."""
+    then writes them all into OUTPUT as a single generated C header"""
     outputs = terraform_outputs()
     endpoint = outputs["iot_endpoint"]["value"]
     thing_name = outputs["thing_name"]["value"]

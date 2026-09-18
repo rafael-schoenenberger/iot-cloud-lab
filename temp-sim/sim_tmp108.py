@@ -5,7 +5,7 @@ drifts over time instead of staying fixed at its .resc startup value.
 The drift is a sine wave between MIN_C and MAX_C, covering the full range
 every cycle. To avoid a repetitive pattern, the period is re-randomized
 within [PERIOD_MIN_S, PERIOD_MAX_S] at each phase wrap (sin() back near
-zero), so only the next oscillation's speed changes, never the value itself."""
+zero), so only the next oscillation's speed changes, never the value itself"""
 
 import math
 import random
@@ -30,11 +30,13 @@ CONNECT_RETRY_PAUSE_S = 3
 def connect():
     """Tries up to CONNECT_MAX_ATTEMPTS times (10s timeout, 3s pause between)
     to reach Renode's monitor, exiting on final failure so `up --wait` can
-    still notice a connection that never succeeds."""
+    still notice a connection that never succeeds"""
     for attempt in range(CONNECT_MAX_ATTEMPTS):
         try:
             sock = socket.create_connection((RENODE_HOST, RENODE_PORT), timeout=CONNECT_TIMEOUT_S)
-            print(f"Connected to Renode monitor at {RENODE_HOST}:{RENODE_PORT}", flush=True)
+            local_ip, local_port = sock.getsockname()
+            print(f"Connected to Renode monitor at {RENODE_HOST}:{RENODE_PORT} "
+                  f"(from {local_ip}:{local_port})", flush=True)
             return sock
         except OSError as exc:
             print(f"Waiting for Renode monitor ({exc}), attempt {attempt + 1}/{CONNECT_MAX_ATTEMPTS}...", flush=True)
@@ -48,7 +50,7 @@ def connect():
 def main():
     """Connects, then loops forever: computes the current sine-wave value,
     sends it to Renode every UPDATE_INTERVAL_S, and reconnects (via connect())
-    if the socket drops in between."""
+    if the socket drops in between"""
     sock = connect()
     phase = 0.0
     period_s = random.uniform(PERIOD_MIN_S, PERIOD_MAX_S)
@@ -61,7 +63,10 @@ def main():
             print(f"Set TMP108 Temperature = {round(temp_c)} (period={period_s:.0f}s)", flush=True)
         except OSError as exc:
             print(f"Lost connection to Renode monitor ({exc}), reconnecting...", flush=True)
-            sock.close()
+            try:
+                sock.close()
+            except OSError:
+                pass
             sock = connect()
             continue
 
