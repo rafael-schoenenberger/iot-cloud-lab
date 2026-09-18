@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    debug.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-17
+  * @date    2026-09-18
   * @brief   Dedicated debug-output task: DebugTask alone owns UART3 debug
   *          output, draining qDebugLog and printing each message via DMA -
   *          see debug_log()
@@ -33,7 +33,7 @@
 QueueHandle_t qDebugLog;
 
 /**
-  * @brief  Formats a debug line and enqueues it for DebugTask to print on
+  * @brief  Formats a debug message and enqueues it for DebugTask to print on
   *         UART3. Drops the message if the queue is full rather than
   *         blocking the caller
   * @param  fmt printf-style format string
@@ -46,7 +46,7 @@ void debug_log(const char *fmt, ...)
 
     va_list args;
     va_start(args, fmt);
-    msg.len = (uint16_t)debug_format_msg(msg.text, sizeof(msg.text), fmt, args);
+    debug_format_msg(msg.text, sizeof(msg.text), fmt, args);
     va_end(args);
 
     xQueueSend(qDebugLog, &msg, 0); /* 0 timeout: drop if DebugTask can't keep up */
@@ -67,7 +67,7 @@ void debug_log_from_isr(BaseType_t *pxHigherPriorityTaskWoken, const char *fmt, 
 
     va_list args;
     va_start(args, fmt);
-    msg.len = (uint16_t)debug_format_msg(msg.text, sizeof(msg.text), fmt, args);
+    debug_format_msg(msg.text, sizeof(msg.text), fmt, args);
     va_end(args);
 
     xQueueSendFromISR(qDebugLog, &msg, pxHigherPriorityTaskWoken);
@@ -96,17 +96,17 @@ void DebugTask(void *argument)
             size_t len = debug_format_line(msg.uptime_ms, msg.text, line, sizeof(line));
             if(!uart3_transmit_dma((uint8_t *)line, (uint16_t)len, UART3_TX_TIMEOUT_MS))
             {
-                uart3_panic_write("DebugTask: uart3_transmit_dma failed\r\n");
+                uart3_panic_write("DebugTask: uart3_transmit_dma failed");
             }
             dequeued++;
         }
 
         if(dequeued == DEBUG_QUEUE_LEN)
         {
-            size_t len = debug_format_line(HAL_GetTick(), "DebugTask: qDebugLog overflow\r\n", line, sizeof(line));
+            size_t len = debug_format_line(HAL_GetTick(), "DebugTask: qDebugLog overflow", line, sizeof(line));
             if(!uart3_transmit_dma((uint8_t *)line, (uint16_t)len, UART3_TX_TIMEOUT_MS))
             {
-                uart3_panic_write("DebugTask: uart3_transmit_dma failed\r\n");
+                uart3_panic_write("DebugTask: uart3_transmit_dma failed");
             }
         }
     }
@@ -119,7 +119,7 @@ void DebugTask(void *argument)
   */
 void scheduler_start_failed(void)
 {
-    uart3_panic_write("Scheduler failed to start\r\n");
+    uart3_panic_write("Scheduler failed to start");
     taskDISABLE_INTERRUPTS();
 
     for(;;)

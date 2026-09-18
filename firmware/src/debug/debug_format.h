@@ -2,9 +2,9 @@
   ******************************************************************************
   * @file    debug_format.h
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-11
+  * @date    2026-09-18
   * @brief   Pure (no FreeRTOS/HAL dependency) message-formatting helpers for
-  *          debug.c - split out so they can be unit-tested on the host, see
+  *          debug.c; split out so they can be unit-tested on the host, see
   *          firmware/unit_tests/debug/test_debug.c
   ******************************************************************************
   */

@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    sensor.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-15
+  * @date    2026-09-18
   * @brief   Periodic TMP108 temperature read task: samples the sensor over
   *          I2C1, logs it on UART3, and hands it off to ModemTask via
   *          qSensorData
@@ -47,17 +47,17 @@ void TempTask(void *argument)
                             I2C_MEMADD_SIZE_8BIT, (uint8_t *)&raw, 1,
                             HAL_MAX_DELAY) != HAL_OK)
         {
-            DBG("TempTask: I2C read failed\r\n")
+            DBG("TempTask: I2C read failed")
             continue;
         }
 
         SensorSample_t sample = { .temp_c = raw, .uptime_ms = HAL_GetTick() };
 
-        DBG("{\"temp_c\":%d,\"uptime_ms\":%lu}\r\n", sample.temp_c, (unsigned long)sample.uptime_ms)
+        DBG("{\"temp_c\":%d,\"uptime_ms\":%lu}", sample.temp_c, (unsigned long)sample.uptime_ms)
 
         if(xQueueSend(qSensorData, &sample, 0) != pdTRUE) /* 0 timeout: skip if still full */
         {
-            DBG("TempTask: qSensorData full, sample dropped\r\n")
+            DBG("TempTask: qSensorData full, sample dropped")
         }
     }
 }

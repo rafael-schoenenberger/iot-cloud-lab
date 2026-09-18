@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    uart.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-17
+  * @date    2026-09-18
   * @brief   USART3 (debug console) and USART1 (SARA-R412M modem link)
   *          initialization, DMA-driven TX for both, ISR-driven single-byte
   *          RX for USART1, and blocking helpers for reading AT command
@@ -112,7 +112,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
     if(xStreamBufferSendFromISR(xUart1Rx, &uart1_rx_byte, 1, &xHigherPriorityTaskWoken) == 0)
     {
-        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "USART1 RX byte dropped, xUart1Rx full\r\n")
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "USART1 RX byte dropped, xUart1Rx full")
     }
 
     configASSERT(HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1) == HAL_OK);
@@ -165,23 +165,23 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 
     if(huart->ErrorCode & HAL_UART_ERROR_ORE)
     {
-        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s overrun error\r\n", port)
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s overrun error", port)
     }
     else if(huart->ErrorCode & HAL_UART_ERROR_FE)
     {
-        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s frame error\r\n", port)
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s frame error", port)
     }
     else if(huart->ErrorCode & HAL_UART_ERROR_NE)
     {
-        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s noise error\r\n", port)
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s noise error", port)
     }
     else if(huart->ErrorCode & HAL_UART_ERROR_PE)
     {
-        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s parity error\r\n", port)
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s parity error", port)
     }
     else if(huart->ErrorCode & HAL_UART_ERROR_DMA)
     {
-        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s DMA error\r\n", port)
+        DBG_FROM_ISR(&xHigherPriorityTaskWoken, "%s DMA error", port)
     }
 
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
@@ -331,11 +331,11 @@ bool uart3_transmit_dma(const uint8_t *data, uint16_t len, uint32_t timeout_ms)
 
 /**
   * @brief  Emergency byte-by-byte write to USART3, used by configASSERT()
-  *         and DebugTask() as a fallback. Polls the register directly,
-  *         bypassing DMA/FreeRTOS entirely, so it still works with
+  *         and DebugTask() as a fallback. Appends "\r\n". Polls the register
+  *         directly, bypassing DMA/FreeRTOS entirely, so it still works with
   *         interrupts disabled or the scheduler dead
-  * @param  msg NUL-terminated string to write, clamped to
-  *         UART3_PANIC_WRITE_MAX_LEN in case it never terminates
+  * @param  msg NUL-terminated string to write, without a trailing "\r\n",
+  *         clamped to UART3_PANIC_WRITE_MAX_LEN in case it never terminates
   * @retval None
   */
 void uart3_panic_write(const char *msg)
@@ -351,6 +351,16 @@ void uart3_panic_write(const char *msg)
         }
 
         USART3->DR = (uint8_t)msg[i];
+    }
+
+    static const char terminator[] = "\r\n";
+    for(size_t i = 0; i < sizeof(terminator) - 1; i++)
+    {
+        while(!(USART3->SR & USART_SR_TXE))
+        {
+        }
+
+        USART3->DR = (uint8_t)terminator[i];
     }
 }
 

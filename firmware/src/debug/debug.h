@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    debug.h
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-17
+  * @date    2026-09-18
   * @brief   Dedicated debug-output task: DebugTask alone drains qDebugLog and
   *          prints each message on UART3, so other tasks log via the DBG()
   *          macro instead of calling uart3_transmit_dma() themselves
@@ -21,13 +21,12 @@
 #define DEBUG 0
 #endif
 
-#define DEBUG_MSG_LEN   64
+#define DEBUG_MSG_LEN   80
 #define DEBUG_QUEUE_LEN 10
 
 typedef struct
 {
     char text[DEBUG_MSG_LEN];
-    uint16_t len;
     uint32_t uptime_ms; /**< HAL_GetTick() at the moment DBG() was called */
 } DebugMsg_t;
 

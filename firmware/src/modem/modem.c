@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    modem.c
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-17
+  * @date    2026-09-18
   * @brief   AT command helpers for the SARA-R412M modem (send/wait, blocking
   *          line reads, cert upload) and ModemTask (network/TLS/MQTT bring-up
   *          + publish loop; payload building in modem_payload.c/.h)
@@ -79,7 +79,7 @@ static bool at_send_retry(const char *cmd)
         }
     }
 
-    DBG("at_send failed after %d attempts: %s\r\n", AT_SEND_MAX_RETRIES, cmd)
+    DBG("at_send failed after %d attempts: %s", AT_SEND_MAX_RETRIES, cmd)
 
     return false;
 }
@@ -118,11 +118,11 @@ static bool at_wait_for(const char *needle, uint32_t timeout_ms)
 
         if(strcmp(line, "ERROR") == 0)
         {
-            DBG("at_wait_for: ERROR received (expected '%s')\r\n", needle)
+            DBG("ERROR (want '%s')", needle)
             return false;
         }
 
-        DBG("at_wait_for: discarded line '%s' (expected '%s')\r\n", line, needle)
+        DBG("discarded '%s' (want '%s')", line, needle)
     }
 
     return false;
@@ -158,25 +158,25 @@ static bool at_send_cert(int type, const char *internal_name, const char *data, 
 
     if(!at_send_retry(cmd))
     {
-        DBG("at_send_cert: failed to send USECMNG for '%s'\r\n", internal_name)
+        DBG("at_send_cert: failed to send USECMNG for '%s'", internal_name)
         return false;
     }
 
     if(!uart1_wait_char('>', AT_SEND_CERT_PROMPT_TIMEOUT_MS))
     {
-        DBG("at_send_cert: '>' prompt never arrived for '%s'\r\n", internal_name)
+        DBG("at_send_cert: '>' prompt never arrived for '%s'", internal_name)
         return false;
     }
 
     if(!uart1_transmit_dma((const uint8_t *)data, (uint16_t)data_len, UART1_TX_TIMEOUT_MS))
     {
-        DBG("at_send_cert: raw data transfer failed for '%s'\r\n", internal_name)
+        DBG("at_send_cert: raw data transfer failed for '%s'", internal_name)
         return false;
     }
 
     if(!at_wait_ok(AT_SEND_CERT_OK_TIMEOUT_MS))
     {
-        DBG("at_send_cert: final OK never arrived for '%s'\r\n", internal_name)
+        DBG("at_send_cert: final OK never arrived for '%s'", internal_name)
         return false;
     }
 

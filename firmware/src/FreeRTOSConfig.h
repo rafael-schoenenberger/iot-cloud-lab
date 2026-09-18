@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    FreeRTOSConfig.h
   * @author  schoenenberger <rafael@schoenenberger.dev>
-  * @date    2026-09-16
+  * @date    2026-09-18
   * @brief   Project-specific FreeRTOS kernel configuration: tick rate, task
   *          priorities/stack/heap sizing, NVIC priority grouping for the
   *          Cortex-M4/ARM_CM3 port, and the configASSERT() failure trap
@@ -73,7 +73,7 @@ void uart3_panic_write(const char *msg);
 #define configASSERT(x) \
     do { \
         if ((x) == 0) { \
-            uart3_panic_write("ASSERT FAILED: " __FILE__ ":" configASSERT_STRINGIZE(__LINE__) "\r\n"); \
+            uart3_panic_write("ASSERT FAILED: " __FILE__ ":" configASSERT_STRINGIZE(__LINE__)); \
             taskDISABLE_INTERRUPTS(); \
             for( ;; ); \
         } \
