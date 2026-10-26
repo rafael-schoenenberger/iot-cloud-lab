@@ -4,15 +4,28 @@ This repository is a personal project simulating an STM32F4-based IoT asset trac
 
 *It's a first version with one sensor value flowing through the whole chain, demonstrating that arbitrary data can be written into the AWS cloud this way. Once deployed via the `.\run.ps1` script, the firmware keeps sampling and publishing a new temperature reading every 2 seconds for as long as the stack runs, so you can compare the running UART debug output (port 9002) against the values being written to the DynamoDB table in your AWS account at any time.*
 
+## Architecture Overview [(architecture diagram)](diagrams/architecture.png)
+
+* **run.ps1:** Provisions the AWS resources via Terraform, writes the certificates and MQTT parameters into the firmware, runs the quality checks (`docs`, `lint`, `unit-test`), starts `temp-sim` and `modem-sim`, builds the firmware (`firmware-build`) and boots it in `renode`, opens PuTTY on the debug output, and follows the container logs.
+* **AWS IoT Core:** Registers the tracker as the IoT Thing `iot-cloud-lab-tracker` and authenticates it via its X.509 certificate. The IoT policy only allows connecting with that name as MQTT client ID and publishing to `trackers/sim1/telemetry`.
+* **IoT Rule:** Selects every message on the telemetry topic, adds `client_id` and `ts`, and writes it to DynamoDB via `PutItem`.
+* **DynamoDB:** Stores the telemetry in the `iot-cloud-lab-tracker-telemetry` table (partition key `client_id`, sort key `ts`).
+* **Quality checks and firmware-build:** One-shot containers from the same image (`firmware:latest`) that run Doxygen, cppcheck, and the Unity unit tests (a failing test stops `run.ps1`), then build the firmware (CMake/Ninja, arm-none-eabi-gcc).
+* **STM32F407 firmware:** Built on STM32 HAL and FreeRTOS. `TempTask` reads the TMP108 over I2C1, `ModemTask` sets up the modem (network attach, certificates, MQTT connection) and publishes the readings via AT commands over USART1, and `DebugTask` writes the debug log to USART3.
+* **renode:** Simulates the STM32F407 (Cortex-M4) and runs the `firmware.elf`. Its UART3 (debug output) and UART1 (modem link) are exposed as TCP sockets on ports 9002 (read by PuTTY) and 9006 (connected to `modem-sim`), its monitor on port 9005 (used by `temp-sim`).
+* **temp-sim:** Drives the simulated TMP108's temperature via Renode's monitor (port 9005), so the readings change over time.
+* **modem-sim:** Simulates the u-blox SARA-R412M modem. It answers the firmware's AT commands on UART1 (port 9006) and forwards the published readings over a real MQTT/TLS connection (port 8883) to AWS IoT Core.
+* **teardown.ps1:** Stops and removes the containers, then destroys the AWS resources via Terraform, without a confirmation prompt.
+
 ## Prerequisites
 
 To work with this project effectively, ensure you have the following tools installed:
 
 * **[PowerShell 7](https://github.com/PowerShell/PowerShell):** Runs `run.ps1`/`teardown.ps1`, the project's main entry points. The Windows-builtin PowerShell 5.1 also works (no PS7-only syntax is used), but PS7 is what this project is developed/tested with.
-* **[Docker Desktop](https://www.docker.com/products/docker-desktop/):** For building and running the Renode, firmware-build, temp-sim, and modem-sim containers.
+* **[Docker Desktop](https://www.docker.com/products/docker-desktop/):** For building and running the firmware-build, renode, temp-sim, and modem-sim containers, plus the docs/lint/unit-test quality checks.
 * **[Terraform](https://developer.hashicorp.com/terraform/install):** Provisions the AWS IoT Core / DynamoDB infrastructure.
 * **[AWS CLI](https://aws.amazon.com/cli/):** Configured with an IAM user's access key ID + secret access key (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) for the target account/region, the standard `aws configure` credential setup that Terraform's AWS provider reads.
-* **[Python](https://www.python.org/):** Runs the script that syncs the AWS IoT device certificate, private key, and root CA into the firmware after each `terraform apply`.
+* **[Python](https://www.python.org/):** Runs the script that syncs the AWS IoT device certificate, private key, root CA, and MQTT parameters into the firmware after each `terraform apply`.
 * **[PuTTY](https://www.chiark.greenend.org.uk/~sgtatham/putty/):** `run.ps1` opens it automatically once the stack is up, connected to the UART3 debug output on `127.0.0.1:9002`.
 * **[VS Code](https://code.visualstudio.com/):** Recommended editor for development.
 * **[Git](https://git-scm.com/):** With submodule support, needed to pull in the vendored STM32 HAL/CMSIS/FreeRTOS/Unity libraries.
@@ -29,10 +42,12 @@ To work with this project effectively, ensure you have the following tools insta
 ├── .vscode/                                # VSCode settings
 ├── compose/                                # Docker Compose orchestration
 │   └── docker-compose.yml                  # firmware-build, renode, temp-sim, modem-sim + opt-in docs/lint/unit-test profiles
+├── diagrams/
+│   └── architecture.png                    # IoT cloud lab architecture diagram
 ├── firmware/                               # STM32 HAL + FreeRTOS tracker firmware
 │   ├── build/                              # Generated by CMake/Ninja (firmware.elf), Doxygen (docs/), cppcheck (lint.log), and the unit test run (test.log); not committed
 │   ├── build_unit_tests/                   # Generated by the unit test build below (Unity), not committed
-│   ├── src/                                # main.c, peripherals/, sensor/, modem/, debug/, CMakeLists.txt, linker script, HAL config
+│   ├── src/                                # main.c, peripherals/, sensor/, modem/, debug/, CMakeLists.txt, linker script, HAL and FreeRTOS config
 │   ├── unit_tests/                         # Unity tests for FreeRTOS/HAL-free logic (e.g. modem_payload.c, debug_format.c); built with plain gcc in the same container, not cross-compiled with arm-none-eabi-gcc like firmware/src
 │   │   ├── debug/                          # test_debug.c: tests debug_format.c
 │   │   ├── modem/                          # test_modem.c: tests modem_payload.c
@@ -65,7 +80,7 @@ To work with this project effectively, ensure you have the following tools insta
 │   ├── boards/                             # stm32f4.repl: peripheral/memory map
 │   ├── scripts/                            # stm32f4.resc: boot script, loads firmware.elf
 │   └── Dockerfile.renode                   # Renode Docker image
-├── temp-sim/                               # Simulates a TMP108 temperature sensor over I2C
+├── temp-sim/                               # Injects temperature values into Renode's simulated TMP108
 │   ├── Dockerfile.temp-sim                 # temp-sim Docker image
 │   └── sim_tmp108.py                       # Drives the simulated TMP108's Temperature via Renode's monitor
 ├── .gitattributes                          # Forces LF line endings for .githooks/* (needed for the #!/bin/sh shebang)
@@ -94,7 +109,7 @@ All public functions carry Doxygen (`@brief`/`@param`/`@retval`) comments.
 
 `modem/modem_payload.c` (building the AT+UMQTTC publish command from a sensor sample) and `debug/debug_format.c` (the pure string-formatting half of `DebugTask`) are both deliberately kept free of any FreeRTOS/HAL dependency, so `firmware/unit_tests/` can compile and run them directly with plain `gcc` in the same container, with no ARM cross-compilation and no Renode needed just to test this logic.
 
-`ModemTask`'s MQTT/AT bring-up (certificate upload + connect) restarts the entire sequence from the beginning after any failed step, including a failed publish, waiting 5 seconds between attempts, so a dropped connection or a temporarily unreachable network is retried rather than left broken until the next boot.
+`ModemTask`'s MQTT/AT bring-up (network attach, certificate upload, MQTT connect) restarts the entire sequence from the beginning after any failed step, including a failed publish, waiting 5 seconds between attempts, so a dropped connection or a temporarily unreachable network is retried rather than left broken until the next boot.
 
 ## Cloud Pipeline
 
